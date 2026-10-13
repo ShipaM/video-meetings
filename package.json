@@ -21,7 +21,9 @@
     "lint:fix": "npm run lint:fix --workspaces --if-present",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "npm run test --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down"
   },
   "devDependencies": {
     "concurrently": "^9.0.0",

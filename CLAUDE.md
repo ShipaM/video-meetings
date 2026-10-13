@@ -23,7 +23,12 @@ npm run build               # build all apps
 npm run lint | lint:fix     # ESLint in every workspace
 npm run format | format:check   # Prettier for the whole repo
 npm run test                # unit tests (api)
+npm run db:up | db:down     # start / stop PostgreSQL via Docker Compose
 ```
+
+## Database
+
+`docker-compose.yml` in the root runs PostgreSQL 17 (`postgres:17-alpine`) on port 5432 with a persistent `postgres_data` volume and a healthcheck. Defaults (user/password `postgres`, database `video_meetings`) can be overridden through a root `.env` file; see `.env.example`.
 
 Target one workspace with `npm run <script> --workspace=web|api`.
 
