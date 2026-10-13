@@ -90,3 +90,6 @@ CLAUDE.local.md
 # Uploaded / recorded media produced at runtime
 uploads
 recordings
+
+# Prisma generated client
+apps/api/src/generated

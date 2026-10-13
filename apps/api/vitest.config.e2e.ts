@@ -7,5 +7,9 @@ export default defineConfig({
     globals: true,
     root: './',
     include: ['**/*.e2e-spec.ts'],
+    // Loads apps/api/.env (DATABASE_URL, JWT_SECRET) before the app is created.
+    setupFiles: ['dotenv/config'],
+    // Suites share one database.
+    fileParallelism: false,
   },
 });
