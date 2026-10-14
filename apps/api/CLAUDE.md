@@ -14,6 +14,7 @@ npm run build        # prisma generate + nest build -> dist/
 npm run prisma:migrate   # prisma migrate dev (needs `npm run db:up` from the root)
 npm run prisma:generate  # regenerate the client in src/generated/prisma (also runs on postinstall)
 npm run start:prod   # node dist/main
+npm run gen:secret   # prints a random 64-char hex string, use it as JWT_SECRET
 npm run lint | lint:fix
 npm run test         # unit tests (src/**/*.spec.ts)
 npm run test:e2e     # e2e tests (test/*.e2e-spec.ts, vitest.config.e2e.ts)
