@@ -38,6 +38,10 @@ Target one workspace with `npm run <script> --workspace=web|api`.
 - The repository is English-only: documentation, code comments and commit messages are in English.
 - If `next build` fails with a `useContext` / prerender error, check that `NODE_ENV` is not set to `development` in the shell.
 
+## MCP
+
+`.mcp.json` in the root registers the project-scoped Playwright MCP server (`npx @playwright/mcp@latest`, started via `cmd /c` on Windows) for browser automation. Claude Code asks to approve it on first use; on macOS/Linux change the command to plain `npx`.
+
 ## Keeping documentation up to date
 
 When the project architecture changes (new app/package, routing, modules, scripts, ports, tooling), update this file and the affected `apps/*/CLAUDE.md` in the same change.
