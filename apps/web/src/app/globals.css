@@ -1,26 +1,84 @@
 @import 'tailwindcss';
-
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@import '@heroui/styles';
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* Animated "aurora" backdrop: blurred colour blobs drifting over a soft base gradient. */
+.aurora {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  background: linear-gradient(135deg, oklch(0.97 0.02 270), oklch(0.95 0.03 320));
+}
+
+.aurora__blob {
+  position: absolute;
+  width: 46vmax;
+  height: 46vmax;
+  border-radius: 9999px;
+  filter: blur(80px);
+  opacity: 0.55;
+  animation: aurora-drift 22s ease-in-out infinite alternate;
+}
+
+.aurora__blob--1 {
+  top: -15%;
+  left: -10%;
+  background: oklch(0.75 0.17 265);
+}
+
+.aurora__blob--2 {
+  right: -12%;
+  bottom: -20%;
+  background: oklch(0.78 0.18 340);
+  animation-duration: 28s;
+  animation-delay: -6s;
+}
+
+.aurora__blob--3 {
+  top: 30%;
+  left: 35%;
+  width: 34vmax;
+  height: 34vmax;
+  background: oklch(0.82 0.14 200);
+  animation-duration: 34s;
+  animation-delay: -12s;
+}
+
+.dark .aurora {
+  background: linear-gradient(135deg, oklch(0.16 0.04 275), oklch(0.13 0.04 310));
+}
+
+.dark .aurora__blob {
+  opacity: 0.4;
+}
+
+@keyframes aurora-drift {
+  0% {
+    transform: translate(0, 0) scale(1) rotate(0deg);
+  }
+  50% {
+    transform: translate(12vmax, -8vmax) scale(1.15) rotate(90deg);
+  }
+  100% {
+    transform: translate(-8vmax, 10vmax) scale(0.9) rotate(180deg);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@media (prefers-reduced-motion: reduce) {
+  .aurora__blob {
+    animation: none;
+  }
+}
+
+/* Translucent glass card with a gradient hairline border. */
+.glass-card {
+  background: color-mix(in oklch, var(--surface) 70%, transparent);
+  backdrop-filter: blur(24px) saturate(160%);
+  border: 1px solid color-mix(in oklch, var(--foreground) 10%, transparent);
+  box-shadow: 0 24px 60px -20px oklch(0.3 0.1 280 / 0.35);
 }

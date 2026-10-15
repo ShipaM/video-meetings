@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Stack
 
-Next.js 16 (App Router, `src/` directory), React 19, TypeScript, Tailwind CSS 4 (via `@tailwindcss/turbopack`). Import alias `@/*` maps to `src/*`.
+Next.js 16 (App Router, `src/` directory), React 19, TypeScript, Tailwind CSS 4 (via `@tailwindcss/postcss`), HeroUI v3 (`@heroui/react`, `@heroui/styles`; no provider, compound components, `onPress`). Import alias `@/*` maps to `src/*`.
 
-`next.config.ts` enables `cacheComponents` and `partialPrefetching`, and wires Tailwind through a Turbopack loader rule for `*.css`.
+`next.config.ts` enables `cacheComponents` and `partialPrefetching`.
 
 Next.js here has breaking changes versus older versions: read the relevant guide in `node_modules/next/dist/docs/` before writing Next.js code (see `AGENTS.md`).
 
@@ -28,7 +28,11 @@ File-system routing under `src/app/`:
 
 - `src/app/layout.tsx` - root layout
 - `src/app/page.tsx` - `/` route
-- `src/app/globals.css` - global styles / Tailwind entry
+- `src/app/globals.css` - global styles: imports `tailwindcss` first, then `@heroui/styles`, plus the animated `.aurora` background and `.glass-card` styles
+- `src/app/register/page.tsx` - `/register` form (HeroUI, native `fetch` to `POST /auth/register`; API base from `NEXT_PUBLIC_API_URL`, default `http://localhost:4000`)
+- `src/app/constants.ts` - theme storage key and the pre-hydration theme script; `src/app/register/constants.ts` - API URL and email/password validation limits (constants live in a `constants.ts` next to the component, not inline)
+- `src/app/theme-toggle.tsx` - light/dark switch (`dark` class + `data-theme` on `<html>`, saved in `localStorage`; an inline script in `layout.tsx` applies it before hydration)
+- `postcss.config.mjs` - PostCSS config with `@tailwindcss/postcss`
 - `eslint.config.mjs` - flat ESLint config
 
 ## Documentation
