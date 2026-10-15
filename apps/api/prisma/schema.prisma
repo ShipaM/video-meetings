@@ -15,4 +15,17 @@ model User {
   passwordHash String
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+  meetings     Meeting[]
+}
+
+model Meeting {
+  id        String   @id @default(uuid())
+  title     String
+  startsAt  DateTime
+  ownerId   String
+  owner     User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerId])
 }

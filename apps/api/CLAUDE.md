@@ -34,6 +34,8 @@ Standard Nest module/controller/service layout:
 - `src/auth/` - `AuthModule`: `POST /auth/register` and `POST /auth/login` (see below)
 - `prisma/schema.prisma`, `prisma/migrations/`, `prisma.config.ts` - Prisma schema (`User`), migrations and CLI config
 - `test/app.e2e-spec.ts`, `test/auth.e2e-spec.ts` - e2e tests using supertest against the Nest app and the real database
+- `src/meetings/` - `MeetingsModule`: `POST /meetings`, `GET /meetings`, `GET /meetings/:id` (see below)
+- `test/meetings.e2e-spec.ts` - e2e tests for the Meeting module (10 tests, written first, TDD)
 
 ## Auth
 
@@ -45,6 +47,22 @@ Both routes take `{ email, password }` and return `201 { accessToken }` (JWT, pa
 | `POST /auth/login`    | `400` invalid e-mail / missing password, `401` unknown e-mail or wrong password (no user is created) |
 
 A global `ValidationPipe` (`whitelist: true`) is registered in `src/main.ts` and in the e2e tests; without it DTO validation does not return `400`.
+
+## Meetings
+
+All routes require `Authorization: Bearer <accessToken>` (`JwtAuthGuard` in `src/auth/`, exported by `AuthModule`; it verifies the JWT and sets `request.user = { id, email }`, typed as `AuthenticatedRequest`). Missing or invalid token gives `401`.
+
+| Route               | Behaviour                                                                                |
+| ------------------- | ---------------------------------------------------------------------------------------- |
+| `POST /meetings`    | body `{ title, startsAt }` (ISO date), `201` with the meeting; `400` on missing/invalid  |
+| `GET /meetings`     | `200`, only the caller's meetings, ordered by `startsAt`                                 |
+| `GET /meetings/:id` | `200`; `404` if it does not exist **or belongs to another user**; `400` on a non-UUID id |
+
+The `Meeting` Prisma model belongs to a `User` (`onDelete: Cascade`).
+
+### CQRS pattern (auth and meetings)
+
+Controllers hold no logic: they build a `Command` (writes) or `Query` (reads) and dispatch it through `CommandBus` / `QueryBus`. Each module has `commands/` and `queries/` with the message class, a `handlers/` folder and an `index.ts` exporting the handler array that the module lists in `providers`. Handlers use `PrismaService` directly (no service layer). Authorization of data is done in the handler by filtering on `ownerId`.
 
 ## Environment
 

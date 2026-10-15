@@ -3,7 +3,9 @@ import { JwtModule } from '@nestjs/jwt';
 import { AuthController } from './auth.controller.js';
 import { CommandHandlers } from './commands/index.js';
 import { QueryHandlers } from './queries/index.js';
+import { JwtAuthGuard } from './jwt-auth.guard.js';
 import { TokenService } from './token.service.js';
+
 @Module({
   imports: [
     JwtModule.registerAsync({
@@ -14,6 +16,7 @@ import { TokenService } from './token.service.js';
     }),
   ],
   controllers: [AuthController],
-  providers: [TokenService, ...CommandHandlers, ...QueryHandlers],
+  providers: [TokenService, JwtAuthGuard, ...CommandHandlers, ...QueryHandlers],
+  exports: [JwtModule, JwtAuthGuard],
 })
 export class AuthModule {}
