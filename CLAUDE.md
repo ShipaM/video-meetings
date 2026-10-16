@@ -23,6 +23,7 @@ npm run build               # build all apps
 npm run lint | lint:fix     # ESLint in every workspace
 npm run format | format:check   # Prettier for the whole repo
 npm run test                # unit tests (api)
+npm run test:e2e --workspace=api   # api e2e tests (need `npm run db:up` and apps/api/.env, see apps/api/CLAUDE.md)
 npm run db:up | db:down     # start / stop PostgreSQL via Docker Compose
 ```
 
