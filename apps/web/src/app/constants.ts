@@ -11,3 +11,10 @@ export const THEME_SCRIPT = `(() => {
     root.style.colorScheme = theme;
   } catch {}
 })();`;
+
+export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+export const ACCESS_TOKEN_KEY = 'accessToken';
+export const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+export const EMAIL_MAX_LENGTH = 254;
+export const RECENT_MEETINGS_COUNT = 3;
+export const MEETING_TITLE_MAX_LENGTH = 200;

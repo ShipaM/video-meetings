@@ -4,23 +4,20 @@ import {
   Alert,
   Button,
   Card,
-  Description,
   FieldError,
   Form,
   Input,
-  InputGroup,
   Label,
   Spinner,
   TextField,
 } from '@heroui/react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useRef, useState } from 'react';
-import {
-  API_URL,
-  EMAIL_MAX_LENGTH,
-  EMAIL_PATTERN,
-  PASSWORD_MAX_LENGTH,
-  PASSWORD_MIN_LENGTH,
-} from './constants';
+import { setAccessToken } from '../auth-storage';
+import { API_URL, EMAIL_MAX_LENGTH, EMAIL_PATTERN } from '../constants';
+import { PasswordField } from '../password-field';
+import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from './constants';
 
 type Status = { type: 'idle' } | { type: 'success' } | { type: 'error'; message: string };
 
@@ -42,32 +39,12 @@ function getPasswordError(value: string): string | null {
   return null;
 }
 
-function EyeIcon({ isOff }: { isOff: boolean }) {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      width="18"
-      height="18"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
-      <circle cx="12" cy="12" r="3" />
-      {isOff ? <path d="m3 3 18 18" /> : null}
-    </svg>
-  );
-}
-
 export default function RegisterPage() {
+  const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [touched, setTouched] = useState({ email: false, password: false });
   const [emailTaken, setEmailTaken] = useState(false);
-  const [isPasswordVisible, setIsPasswordVisible] = useState(false);
   const [isPending, setIsPending] = useState(false);
   const [status, setStatus] = useState<Status>({ type: 'idle' });
   const emailRef = useRef<HTMLInputElement>(null);
@@ -112,8 +89,9 @@ export default function RegisterPage() {
       }
 
       const { accessToken } = (await response.json()) as { accessToken: string };
-      localStorage.setItem('accessToken', accessToken);
+      setAccessToken(accessToken);
       setStatus({ type: 'success' });
+      router.replace('/');
     } catch {
       setStatus({ type: 'error', message: 'The server is unavailable. Please try again later.' });
     } finally {
@@ -158,46 +136,22 @@ export default function RegisterPage() {
               <FieldError className="text-sm">{emailError}</FieldError>
             </TextField>
 
-            <TextField
-              isRequired
-              name="password"
-              type={isPasswordVisible ? 'text' : 'password'}
-              autoComplete="new-password"
-              isDisabled={isSuccess}
+            <PasswordField
               value={password}
               onChange={setPassword}
               onBlur={() => setTouched((prev) => ({ ...prev, password: true }))}
-              isInvalid={passwordError !== null}
-              validationBehavior="aria"
-            >
-              <Label>Password</Label>
-              <InputGroup fullWidth>
-                <InputGroup.Input ref={passwordRef} placeholder="Create a password" />
-                <InputGroup.Suffix className="pr-1">
-                  <Button
-                    isIconOnly
-                    size="sm"
-                    variant="ghost"
-                    isDisabled={isSuccess}
-                    aria-label={isPasswordVisible ? 'Hide password' : 'Show password'}
-                    aria-pressed={isPasswordVisible}
-                    onPress={() => setIsPasswordVisible((visible) => !visible)}
-                  >
-                    <EyeIcon isOff={isPasswordVisible} />
-                  </Button>
-                </InputGroup.Suffix>
-              </InputGroup>
-              {passwordError === null && (
-                <Description className="text-sm">
-                  Use {PASSWORD_MIN_LENGTH}–{PASSWORD_MAX_LENGTH} characters
-                </Description>
-              )}
-              <FieldError className="text-sm">{passwordError}</FieldError>
-            </TextField>
+              error={passwordError}
+              autoComplete="new-password"
+              placeholder="Create a password"
+              hint={`Use ${PASSWORD_MIN_LENGTH}–${PASSWORD_MAX_LENGTH} characters`}
+              isDisabled={isSuccess}
+              inputRef={passwordRef}
+            />
 
             <div aria-live="polite" className="empty:-mt-5">
               {status.type === 'error' && (
                 <Alert status="danger">
+                  <Alert.Indicator />
                   <Alert.Content>
                     <Alert.Description>{status.message}</Alert.Description>
                   </Alert.Content>
@@ -205,9 +159,10 @@ export default function RegisterPage() {
               )}
               {isSuccess && (
                 <Alert status="success">
+                  <Alert.Indicator />
                   <Alert.Content>
                     <Alert.Title>You&apos;re all set</Alert.Title>
-                    <Alert.Description>Your account has been created.</Alert.Description>
+                    <Alert.Description>Taking you to your meetings…</Alert.Description>
                   </Alert.Content>
                 </Alert>
               )}
@@ -222,6 +177,15 @@ export default function RegisterPage() {
               )}
             </Button>
           </Form>
+          <p className="text-muted mt-5 text-center text-sm">
+            Already have an account?{' '}
+            <Link
+              href="/login"
+              className="text-accent font-medium underline-offset-4 hover:underline"
+            >
+              Sign in
+            </Link>
+          </p>
         </Card.Content>
       </Card>
     </main>
