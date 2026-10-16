@@ -1,31 +1,46 @@
 import { ConflictException } from '@nestjs/common';
-import { Prisma } from '../../../generated/prisma/client.js';
-import type { PrismaService } from '../../../prisma/prisma.service.js';
+import type { CommandBus } from '@nestjs/cqrs';
+import { compare } from 'bcryptjs';
+import { CreateUserCommand } from '../../../users/index.js';
 import type { TokenService } from '../../token.service.js';
 import { RegisterUserCommand } from '../register-user.command.js';
 import { RegisterUserHandler } from './register-user.handler.js';
 
 describe('RegisterUserHandler', () => {
-  const create = vi.fn<(args: { data: { email: string } }) => Promise<unknown>>();
-  const issue = vi.fn().mockResolvedValue({ accessToken: 'token' });
+  const execute = vi.fn();
+  const issue = vi.fn();
   const handler = new RegisterUserHandler(
-    { user: { create } } as unknown as PrismaService,
+    { execute } as unknown as CommandBus,
     { issue } as unknown as TokenService,
   );
 
-  it('lower-cases the e-mail and returns a token', async () => {
-    create.mockResolvedValue({ id: 'u1', email: 'a@b.com' });
-    const result = await handler.execute(new RegisterUserCommand('A@B.com', 'Str0ngPassw0rd!'));
-    expect(result).toEqual({ accessToken: 'token' });
-    expect(create.mock.lastCall?.[0].data.email).toBe('a@b.com');
+  beforeEach(() => {
+    execute.mockReset();
+    issue.mockReset();
   });
 
-  it('maps a unique-constraint error (P2002) to ConflictException', async () => {
-    create.mockRejectedValue(
-      new Prisma.PrismaClientKnownRequestError('duplicate', { code: 'P2002', clientVersion: '7' }),
-    );
+  it('creates the user through the bus with a hashed password and issues a token', async () => {
+    execute.mockResolvedValue({ id: 'u1', email: 'a@example.com', passwordHash: 'ignored' });
+    issue.mockResolvedValue({ accessToken: 'jwt' });
+
     await expect(
-      handler.execute(new RegisterUserCommand('a@b.com', 'Str0ngPassw0rd!')),
-    ).rejects.toBeInstanceOf(ConflictException);
+      handler.execute(new RegisterUserCommand('A@Example.com', 'Str0ngPassw0rd!')),
+    ).resolves.toEqual({ accessToken: 'jwt' });
+
+    const command = execute.mock.calls[0][0] as CreateUserCommand;
+    expect(command).toBeInstanceOf(CreateUserCommand);
+    expect(command.email).toBe('A@Example.com');
+    expect(command.passwordHash).not.toBe('Str0ngPassw0rd!');
+    await expect(compare('Str0ngPassw0rd!', command.passwordHash)).resolves.toBe(true);
+    expect(issue).toHaveBeenCalledWith('u1', 'a@example.com');
+  });
+
+  it('does not issue a token when the user cannot be created', async () => {
+    execute.mockRejectedValue(new ConflictException());
+
+    await expect(
+      handler.execute(new RegisterUserCommand('a@example.com', 'Str0ngPassw0rd!')),
+    ).rejects.toThrow(ConflictException);
+    expect(issue).not.toHaveBeenCalled();
   });
 });
