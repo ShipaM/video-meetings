@@ -93,3 +93,6 @@ recordings
 
 # Prisma generated client
 apps/api/src/generated
+
+# Playwright MCP artifacts (screenshots, snapshots, console logs)
+.playwright-mcp

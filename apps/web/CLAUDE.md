@@ -35,6 +35,15 @@ File-system routing under `src/app/`:
 - `postcss.config.mjs` - PostCSS config with `@tailwindcss/postcss`
 - `eslint.config.mjs` - flat ESLint config
 
+## UI changes: mandatory visual check
+
+For any change to the UI of this app:
+
+- Always apply the `ui-ux-pro-max` skill.
+- Always test the change visually through the Playwright MCP server (not any other browser tooling).
+- The dev server is already running (http://localhost:3000); do not start it.
+- The task is done only after the visual check has passed.
+
 ## Documentation
 
 Update this file when routes, structure or tooling of this app change.
