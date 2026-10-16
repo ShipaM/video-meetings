@@ -39,6 +39,10 @@ Target one workspace with `npm run <script> --workspace=web|api`.
 - The repository is English-only: documentation, code comments and commit messages are in English.
 - If `next build` fails with a `useContext` / prerender error, check that `NODE_ENV` is not set to `development` in the shell.
 
+## Git hooks
+
+Husky (`.husky/pre-commit`, installed by the root `prepare` script on `npm install`) runs `lint-staged` and then `npm test` before every commit. `lint-staged.config.mjs` runs ESLint `--fix` (through the owning workspace) and Prettier on the staged files. Bypass in an emergency with `git commit --no-verify`.
+
 ## MCP
 
 `.mcp.json` in the root registers the project-scoped Playwright MCP server (`npx @playwright/mcp@latest`, started via `cmd /c` on Windows) for browser automation. Claude Code asks to approve it on first use; on macOS/Linux change the command to plain `npx`.
