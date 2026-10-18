@@ -5,6 +5,7 @@ import { GetMeetingQuery } from '../../../meetings/index.js';
 import { PrismaService } from '../../../prisma/prisma.service.js';
 import { resolveFileType } from '../../file-types.js';
 import { FilesStorageService } from '../../files-storage.service.js';
+import { ABANDONED_UPLOAD_MS } from '../../meeting-files.config.js';
 import { CreateUploadCommand } from '../create-upload.command.js';
 
 /** Free space kept on the disk on top of the upload itself. */
@@ -34,7 +35,8 @@ export class CreateUploadHandler implements ICommandHandler<CreateUploadCommand>
       throw new BadRequestException('File type is not allowed');
     }
 
-    if ((await this.storage.freeBytes()) < size + DISK_RESERVE_BYTES) {
+    const [free, promised] = await Promise.all([this.storage.freeBytes(), this.promisedBytes()]);
+    if (free - promised < size + DISK_RESERVE_BYTES) {
       throw new HttpException('Not enough storage space', HttpStatus.INSUFFICIENT_STORAGE);
     }
 
@@ -50,5 +52,22 @@ export class CreateUploadHandler implements ICommandHandler<CreateUploadCommand>
         storageKey: uploadId,
       },
     });
+  }
+
+  /** Bytes that active (not abandoned) uploads still have to write, so parallel uploads fit. */
+  private async promisedBytes(): Promise<number> {
+    const active = await this.prisma.meetingFile.findMany({
+      where: {
+        status: 'UPLOADING',
+        lastChunkAt: { gte: new Date(Date.now() - ABANDONED_UPLOAD_MS) },
+      },
+      select: { size: true, storageKey: true },
+    });
+    const remaining = await Promise.all(
+      active.map(
+        async ({ size, storageKey }) => Number(size) - (await this.storage.storedBytes(storageKey)),
+      ),
+    );
+    return remaining.reduce((sum, bytes) => sum + Math.max(bytes, 0), 0);
   }
 }

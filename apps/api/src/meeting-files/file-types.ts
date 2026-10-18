@@ -161,15 +161,22 @@ async function looksLikeText(filePath: string): Promise<boolean> {
   }
 }
 
-/** Checks the file's magic bytes against its stored MIME type (the client declaration is not trusted). */
+/**
+ * Checks the file's magic bytes against its stored MIME type (the client declaration is not
+ * trusted). A file that cannot be read counts as not matching.
+ */
 export async function contentMatchesType(filePath: string, mimeType: string): Promise<boolean> {
   const entry = ALLOWED_TYPES.find((item) => item.mimeType === mimeType);
   if (!entry) {
     return false;
   }
-  if (entry.detected === 'text') {
-    return looksLikeText(filePath);
+  try {
+    if (entry.detected === 'text') {
+      return await looksLikeText(filePath);
+    }
+    const detected = await fileTypeFromFile(filePath);
+    return detected !== undefined && entry.detected.includes(detected.ext);
+  } catch {
+    return false;
   }
-  const detected = await fileTypeFromFile(filePath);
-  return detected !== undefined && entry.detected.includes(detected.ext);
 }

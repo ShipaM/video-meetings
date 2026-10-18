@@ -1,13 +1,16 @@
 import { HttpException, Injectable } from '@nestjs/common';
-import { CommandBus, QueryBus } from '@nestjs/cqrs';
+import { CommandBus } from '@nestjs/cqrs';
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Server, type ServerOptions } from '@tus/server';
 import type { AuthenticatedRequest } from '../auth/jwt-auth.guard.js';
-import { CompleteUploadCommand, CreateUploadCommand } from './commands/index.js';
+import {
+  AuthorizeUploadRequestCommand,
+  CompleteUploadCommand,
+  CreateUploadCommand,
+} from './commands/index.js';
 import { FilesStorageService } from './files-storage.service.js';
 import { MAX_FILE_SIZE } from './meeting-files.config.js';
-import { GetUploadQuery } from './queries/index.js';
 
 type TusRequest = Parameters<NonNullable<ServerOptions['onIncomingRequest']>>[0];
 
@@ -50,7 +53,7 @@ function userIdOf(req: TusRequest): string {
 export class TusService {
   readonly server: Server;
 
-  constructor(commandBus: CommandBus, queryBus: QueryBus, storage: FilesStorageService) {
+  constructor(commandBus: CommandBus, storage: FilesStorageService) {
     this.server = new Server({
       path: '/uploads',
       datastore: storage.store,
@@ -62,7 +65,9 @@ export class TusService {
         tusHook(async () => {
           // POST creates the upload; its checks live in onUploadCreate.
           if (req.method !== 'POST') {
-            await queryBus.execute(new GetUploadQuery(userIdOf(req), uploadId));
+            await commandBus.execute(
+              new AuthorizeUploadRequestCommand(userIdOf(req), uploadId, req.method),
+            );
           }
         }),
       onUploadCreate: (req, upload) =>

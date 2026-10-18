@@ -62,6 +62,8 @@ export class MeetingFilesController {
             'Content-Type': file.mimeType,
             'X-Content-Type-Options': 'nosniff',
             'Cache-Control': 'private, no-store',
+            // The link carries a token: never leak it through Referer.
+            'Referrer-Policy': 'no-referrer',
           },
         },
         (error) => {

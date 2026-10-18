@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { statfs } from 'node:fs/promises';
+import { stat, statfs } from 'node:fs/promises';
 import path from 'node:path';
 import { FileStore } from '@tus/file-store';
 import { resolveFilesDir } from './meeting-files.config.js';
@@ -26,5 +26,14 @@ export class FilesStorageService {
   async freeBytes(): Promise<number> {
     const { bavail, bsize } = await statfs(this.root);
     return bavail * bsize;
+  }
+
+  /** Bytes already written for a key (0 when there is no data file). */
+  async storedBytes(storageKey: string): Promise<number> {
+    try {
+      return (await stat(this.pathOf(storageKey))).size;
+    } catch {
+      return 0;
+    }
   }
 }

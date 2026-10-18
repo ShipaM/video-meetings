@@ -10,10 +10,12 @@ describe('CreateUploadHandler', () => {
   const create = vi.fn();
   const execute = vi.fn();
   const freeBytes = vi.fn();
+  const findMany = vi.fn();
+  const storedBytes = vi.fn();
   const handler = new CreateUploadHandler(
-    { meetingFile: { create } } as unknown as PrismaService,
+    { meetingFile: { create, findMany } } as unknown as PrismaService,
     { execute } as unknown as QueryBus,
-    { freeBytes } as unknown as FilesStorageService,
+    { freeBytes, storedBytes } as unknown as FilesStorageService,
   );
 
   const command = (metadata: Record<string, string | null>, size = 1024) =>
@@ -23,6 +25,9 @@ describe('CreateUploadHandler', () => {
     create.mockReset();
     execute.mockReset();
     freeBytes.mockReset();
+    findMany.mockReset();
+    storedBytes.mockReset();
+    findMany.mockResolvedValue([]);
     execute.mockResolvedValue({ id: 'm1' });
     freeBytes.mockResolvedValue(100 * 1024 ** 3);
   });
@@ -84,6 +89,25 @@ describe('CreateUploadHandler', () => {
       .execute(command({ meetingId: 'm1', filename: 'a.mp4', filetype: 'video/mp4' }))
       .catch((e: unknown) => e)) as HttpException;
     expect(error.getStatus()).toBe(507);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('keeps room for the bytes active uploads still have to write (507)', async () => {
+    freeBytes.mockResolvedValue(3 * 1024 ** 3);
+    findMany.mockResolvedValue([{ size: BigInt(2 * 1024 ** 3), storageKey: 'other' }]);
+    storedBytes.mockResolvedValue(512 * 1024 ** 2);
+
+    const error = (await handler
+      .execute(
+        command({ meetingId: 'm1', filename: 'a.mp4', filetype: 'video/mp4' }, 2 * 1024 ** 3),
+      )
+      .catch((e: unknown) => e)) as HttpException;
+    expect(error.getStatus()).toBe(507);
+    expect(findMany).toHaveBeenCalledWith({
+      where: { status: 'UPLOADING', lastChunkAt: { gte: expect.any(Date) as Date } },
+      select: { size: true, storageKey: true },
+    });
+    expect(storedBytes).toHaveBeenCalledWith('other');
     expect(create).not.toHaveBeenCalled();
   });
 });

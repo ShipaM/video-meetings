@@ -8,13 +8,7 @@ async function bootstrap() {
   app.enableCors({
     origin: process.env.WEB_ORIGIN ?? 'http://localhost:3000',
     // The browser tus client must read these from upload responses.
-    exposedHeaders: [
-      'Location',
-      'Upload-Offset',
-      'Upload-Length',
-      'Tus-Resumable',
-      'Upload-Expires',
-    ],
+    exposedHeaders: ['Location', 'Upload-Offset', 'Upload-Length', 'Tus-Resumable'],
   });
   app.useGlobalPipes(new ValidationPipe({ whitelist: true }));
   await app.listen(process.env.PORT ?? 4000);

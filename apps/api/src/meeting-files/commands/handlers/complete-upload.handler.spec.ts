@@ -9,13 +9,16 @@ import { CompleteUploadHandler } from './complete-upload.handler.js';
 
 describe('CompleteUploadHandler', () => {
   const findUnique = vi.fn();
-  const update = vi.fn();
+  const findUniqueOrThrow = vi.fn();
+  const updateMany = vi.fn();
+  const deleteMany = vi.fn();
   const remove = vi.fn();
-  const del = vi.fn();
   let dir: string;
 
   const handler = new CompleteUploadHandler(
-    { meetingFile: { findUnique, update, delete: del } } as unknown as PrismaService,
+    {
+      meetingFile: { findUnique, findUniqueOrThrow, updateMany, deleteMany },
+    } as unknown as PrismaService,
     { pathOf: (key: string) => path.join(dir, key), remove } as unknown as FilesStorageService,
   );
 
@@ -31,20 +34,23 @@ describe('CompleteUploadHandler', () => {
 
   beforeEach(() => {
     findUnique.mockReset();
-    update.mockReset();
+    findUniqueOrThrow.mockReset();
+    updateMany.mockReset();
+    deleteMany.mockReset();
     remove.mockReset();
-    del.mockReset();
   });
 
-  it('marks a file with matching content as READY', async () => {
+  it('marks a file with matching content as READY, only while it is UPLOADING', async () => {
     await writeFile(path.join(dir, 'f1'), 'Plain meeting notes\n');
     findUnique.mockResolvedValue(uploading);
-    update.mockResolvedValue({ ...uploading, status: 'READY' });
+    findUniqueOrThrow.mockResolvedValue({ ...uploading, status: 'READY' });
 
-    await handler.execute(new CompleteUploadCommand('f1'));
+    await expect(handler.execute(new CompleteUploadCommand('f1'))).resolves.toMatchObject({
+      status: 'READY',
+    });
 
-    expect(update).toHaveBeenCalledWith({
-      where: { id: 'f1' },
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: 'f1', status: 'UPLOADING' },
       data: { status: 'READY', completedAt: expect.any(Date) as Date },
     });
     expect(remove).not.toHaveBeenCalled();
@@ -57,9 +63,18 @@ describe('CompleteUploadHandler', () => {
     await expect(handler.execute(new CompleteUploadCommand('f1'))).rejects.toThrow(
       BadRequestException,
     );
-    expect(del).toHaveBeenCalledWith({ where: { id: 'f1' } });
+    expect(deleteMany).toHaveBeenCalledWith({ where: { id: 'f1', status: 'UPLOADING' } });
     expect(remove).toHaveBeenCalledWith('f1');
-    expect(update).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it('treats a missing data file as a mismatch instead of failing', async () => {
+    findUnique.mockResolvedValue({ ...uploading, storageKey: 'missing' });
+
+    await expect(handler.execute(new CompleteUploadCommand('f1'))).rejects.toThrow(
+      BadRequestException,
+    );
+    expect(remove).toHaveBeenCalledWith('missing');
   });
 
   it('leaves a file that is no longer UPLOADING untouched', async () => {
@@ -67,6 +82,7 @@ describe('CompleteUploadHandler', () => {
 
     await handler.execute(new CompleteUploadCommand('f1'));
 
-    expect(update).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(deleteMany).not.toHaveBeenCalled();
   });
 });

@@ -230,6 +230,53 @@ describe('Meeting files (e2e)', () => {
       expect(sha256(res.body as Buffer)).toBe(sha256(data));
     });
 
+    it('records the time of the last chunk', async () => {
+      const data = fakeMp4(2 * MiB);
+      const created = await createUpload(ownerToken, meetingId, data.length).expect(201);
+      const location = created.headers.location;
+      const prisma = app.get(PrismaService);
+      const longAgo = new Date('2020-01-01T00:00:00.000Z');
+      await prisma.meetingFile.update({
+        where: { id: fileIdOf(location) },
+        data: { lastChunkAt: longAgo },
+      });
+
+      await patchChunk(ownerToken, location, 0, data.subarray(0, MiB)).expect(204);
+
+      const file = await prisma.meetingFile.findUniqueOrThrow({
+        where: { id: fileIdOf(location) },
+      });
+      expect(file.lastChunkAt.getTime()).toBeGreaterThan(longAgo.getTime());
+    });
+
+    it('completes on HEAD an upload whose completion failed after the last chunk', async () => {
+      const data = fakeMp4(MiB);
+      const location = await upload(ownerToken, meetingId, data);
+      // Simulate a failed completion hook (e.g. a database error): all bytes stored, row UPLOADING.
+      await app.get(PrismaService).meetingFile.update({
+        where: { id: fileIdOf(location) },
+        data: { status: 'UPLOADING', completedAt: null },
+      });
+      expect((await listFiles(ownerToken, meetingId)).map((f) => f.id)).not.toContain(
+        fileIdOf(location),
+      );
+
+      // tus-js-client retries with HEAD; it sees the full offset and reports success.
+      expect(await headOffset(ownerToken, location)).toBe(data.length);
+
+      const file = (await listFiles(ownerToken, meetingId)).find(
+        (item) => item.id === fileIdOf(location),
+      );
+      expect(file).toMatchObject({ status: 'READY', size: data.length });
+    });
+
+    it('rejects writing to a completed upload (409)', async () => {
+      const data = fakeMp4(1024);
+      const location = await upload(ownerToken, meetingId, data);
+
+      await patchChunk(ownerToken, location, data.length, Buffer.from('x')).expect(409);
+    });
+
     it('accepts a plain text document', async () => {
       const data = Buffer.from('Meeting notes\nAction items: none\n', 'utf8');
       const location = await upload(ownerToken, meetingId, data, 'notes.txt', 'text/plain');
@@ -345,6 +392,7 @@ describe('Meeting files (e2e)', () => {
       expect(res.headers['content-disposition']).toContain('attachment');
       expect(res.headers['content-disposition']).toContain('filename="Weekly sync.mp4"');
       expect(res.headers['x-content-type-options']).toBe('nosniff');
+      expect(res.headers['referrer-policy']).toBe('no-referrer');
       expect(sha256(res.body as Buffer)).toBe(sha256(data));
     });
 
