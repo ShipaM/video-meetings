@@ -1,6 +1,9 @@
 import {
   Controller,
+  Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   NotFoundException,
   Param,
   ParseUUIDPipe,
@@ -10,16 +13,20 @@ import {
   Res,
   UseGuards,
 } from '@nestjs/common';
-import { QueryBus } from '@nestjs/cqrs';
+import { CommandBus, QueryBus } from '@nestjs/cqrs';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import type { AuthenticatedRequest } from '../auth/jwt-auth.guard.js';
+import { DeleteMeetingFileCommand } from './commands/index.js';
 import type { FileLink, MeetingFileView } from './meeting-files.types.js';
 import { GetFileContentQuery, GetFileLinkQuery, ListMeetingFilesQuery } from './queries/index.js';
 
 @Controller()
 export class MeetingFilesController {
-  constructor(private readonly queryBus: QueryBus) {}
+  constructor(
+    private readonly commandBus: CommandBus,
+    private readonly queryBus: QueryBus,
+  ) {}
 
   @Get('meetings/:id/files')
   @UseGuards(JwtAuthGuard)
@@ -38,6 +45,17 @@ export class MeetingFilesController {
     @Param('fileId', ParseUUIDPipe) fileId: string,
   ): Promise<FileLink> {
     return this.queryBus.execute(new GetFileLinkQuery(user.id, meetingId, fileId));
+  }
+
+  @Delete('meetings/:id/files/:fileId')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  remove(
+    @Req() { user }: AuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) meetingId: string,
+    @Param('fileId', ParseUUIDPipe) fileId: string,
+  ): Promise<void> {
+    return this.commandBus.execute(new DeleteMeetingFileCommand(user.id, meetingId, fileId));
   }
 
   /**

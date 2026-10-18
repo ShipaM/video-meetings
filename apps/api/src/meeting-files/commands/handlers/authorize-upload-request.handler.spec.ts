@@ -8,11 +8,11 @@ import { AuthorizeUploadRequestHandler } from './authorize-upload-request.handle
 
 describe('AuthorizeUploadRequestHandler', () => {
   const findFirst = vi.fn();
-  const update = vi.fn();
+  const updateMany = vi.fn();
   const execute = vi.fn();
   const getUpload = vi.fn();
   const handler = new AuthorizeUploadRequestHandler(
-    { meetingFile: { findFirst, update } } as unknown as PrismaService,
+    { meetingFile: { findFirst, updateMany } } as unknown as PrismaService,
     { execute } as unknown as CommandBus,
     { store: { getUpload } } as unknown as FilesStorageService,
   );
@@ -21,7 +21,7 @@ describe('AuthorizeUploadRequestHandler', () => {
 
   beforeEach(() => {
     findFirst.mockReset();
-    update.mockReset();
+    updateMany.mockReset();
     execute.mockReset();
     getUpload.mockReset();
   });
@@ -38,14 +38,25 @@ describe('AuthorizeUploadRequestHandler', () => {
   it('records chunk activity on PATCH', async () => {
     findFirst.mockResolvedValue(uploading);
     getUpload.mockResolvedValue({ offset: 40 });
+    updateMany.mockResolvedValue({ count: 1 });
 
     await handler.execute(new AuthorizeUploadRequestCommand('u1', 'f1', 'PATCH'));
 
-    expect(update).toHaveBeenCalledWith({
-      where: { id: 'f1' },
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: 'f1', status: 'UPLOADING' },
       data: { lastChunkAt: expect.any(Date) as Date },
     });
     expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('answers 404 on PATCH when the upload was cancelled or cleaned up meanwhile', async () => {
+    findFirst.mockResolvedValue(uploading);
+    getUpload.mockResolvedValue({ offset: 40 });
+    updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      handler.execute(new AuthorizeUploadRequestCommand('u1', 'f1', 'PATCH')),
+    ).rejects.toThrow(NotFoundException);
   });
 
   it('does not write anything on HEAD of an upload in progress', async () => {
@@ -54,7 +65,7 @@ describe('AuthorizeUploadRequestHandler', () => {
 
     await handler.execute(new AuthorizeUploadRequestCommand('u1', 'f1', 'HEAD'));
 
-    expect(update).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
     expect(execute).not.toHaveBeenCalled();
   });
 

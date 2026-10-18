@@ -32,3 +32,17 @@ export function fileLinkSecret(): string {
 
 /** An upload with no chunk for this long counts as abandoned (PRD: 24 hours after the last part). */
 export const ABANDONED_UPLOAD_MS = 24 * 60 * 60 * 1000;
+
+/** How often abandoned uploads and orphan files are looked for. */
+export const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+
+/**
+ * A file on disk without a `MeetingFile` row is removed only once it is this old. The row is
+ * created before tus writes the file, so this is only a safety margin for removals in progress.
+ */
+export const ORPHAN_GRACE_MS = 60 * 60 * 1000;
+
+/** `FILES_CLEANUP=off` disables the scheduled cleanup (e2e tests share the dev database). */
+export function filesCleanupEnabled(): boolean {
+  return process.env.FILES_CLEANUP !== 'off';
+}

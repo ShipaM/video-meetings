@@ -58,11 +58,11 @@ the meeting's file list and download the original. Files live on local disk, out
 **Affects:** backend
 **Tasks**
 
-- [ ] e2e tests first: cancel removes the upload and its partial data, delete makes the file, its download link and
+- [x] e2e tests first: cancel removes the upload and its partial data, delete makes the file, its download link and
       its details return `404`, resume after an interrupted chunk continues from the stored offset.
-- [ ] Cancel an upload: removes the `UPLOADING` record and the partial data on disk.
-- [ ] Scheduled cleanup of uploads with no received part for 24 hours (record and partial data).
-- [ ] `DELETE /meetings/:id/files/:fileId`: removes the stored original and the record (later phases extend it to
+- [x] Cancel an upload: removes the `UPLOADING` record and the partial data on disk.
+- [x] Scheduled cleanup of uploads with no received part for 24 hours (record and partial data).
+- [x] `DELETE /meetings/:id/files/:fileId`: removes the stored original and the record (later phases extend it to
       results); update `apps/api/CLAUDE.md`.
       **Done when:** e2e suites are green and the storage directory contains no leftovers after cancel, cleanup and
       delete.

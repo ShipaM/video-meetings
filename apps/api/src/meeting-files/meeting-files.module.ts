@@ -1,5 +1,6 @@
 import { Module, OnModuleInit } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module.js';
+import { AbandonedUploadsScheduler } from './abandoned-uploads.scheduler.js';
 import { CommandHandlers } from './commands/index.js';
 import { FilesStorageService } from './files-storage.service.js';
 import { fileLinkSecret } from './meeting-files.config.js';
@@ -11,7 +12,13 @@ import { UploadsController } from './uploads.controller.js';
 @Module({
   imports: [AuthModule],
   controllers: [UploadsController, MeetingFilesController],
-  providers: [FilesStorageService, TusService, ...CommandHandlers, ...QueryHandlers],
+  providers: [
+    FilesStorageService,
+    TusService,
+    AbandonedUploadsScheduler,
+    ...CommandHandlers,
+    ...QueryHandlers,
+  ],
 })
 export class MeetingFilesModule implements OnModuleInit {
   onModuleInit(): void {

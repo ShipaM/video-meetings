@@ -38,11 +38,17 @@ export class AuthorizeUploadRequestHandler implements ICommandHandler<AuthorizeU
     }
 
     if (method === 'PATCH') {
-      // The start of each chunk; abandoned uploads are found by this timestamp.
-      return this.prisma.meetingFile.update({
-        where: { id: fileId },
-        data: { lastChunkAt: new Date() },
+      // The start of each chunk; abandoned uploads are found by this timestamp. Conditional, because
+      // a cancel or the cleanup may have deleted the row since it was read.
+      const lastChunkAt = new Date();
+      const { count } = await this.prisma.meetingFile.updateMany({
+        where: { id: fileId, status: 'UPLOADING' },
+        data: { lastChunkAt },
       });
+      if (count === 0) {
+        throw new NotFoundException('Upload not found');
+      }
+      return { ...file, lastChunkAt };
     }
     return file;
   }

@@ -1,11 +1,12 @@
-import { Controller, Head, Patch, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { Controller, Delete, Head, Patch, Post, Req, Res, UseGuards } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { TusService } from './tus.service.js';
 
 /**
  * tus endpoints: `POST /uploads` creates an upload, `HEAD /uploads/:id` reports the stored offset,
- * `PATCH /uploads/:id` appends a chunk. The bearer token is checked before tus sees the request.
+ * `PATCH /uploads/:id` appends a chunk, `DELETE /uploads/:id` cancels an upload in progress.
+ * The bearer token is checked before tus sees the request.
  * tus `GET` (download) is deliberately not routed: files are only served through signed links.
  */
 @Controller('uploads')
@@ -25,6 +26,11 @@ export class UploadsController {
 
   @Patch(':id')
   append(@Req() req: Request, @Res() res: Response): Promise<void> {
+    return this.tus.handle(req, res);
+  }
+
+  @Delete(':id')
+  cancel(@Req() req: Request, @Res() res: Response): Promise<void> {
     return this.tus.handle(req, res);
   }
 }
