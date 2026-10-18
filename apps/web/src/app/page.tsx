@@ -108,14 +108,30 @@ export default function HomePage() {
             {recent.length > 0 && (
               <ul className="flex flex-col gap-2">
                 {recent.map((meeting) => (
-                  <li
-                    key={meeting.id}
-                    className="border-default flex flex-col gap-0.5 rounded-2xl border px-4 py-3"
-                  >
-                    <span className="font-medium wrap-break-word">{meeting.title}</span>
-                    <time dateTime={meeting.startsAt} className="text-muted text-sm">
-                      {formatMeetingDate(meeting.startsAt)}
-                    </time>
+                  <li key={meeting.id}>
+                    <Link
+                      href={`/meetings/${meeting.id}`}
+                      className="border-default hover:border-accent hover:bg-accent/5 focus-visible:ring-accent flex items-center gap-3 rounded-2xl border px-4 py-3 transition-colors duration-200 focus-visible:ring-2 focus-visible:outline-none"
+                    >
+                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                        <span className="font-medium wrap-break-word">{meeting.title}</span>
+                        <time dateTime={meeting.startsAt} className="text-muted text-sm">
+                          {formatMeetingDate(meeting.startsAt)}
+                        </time>
+                      </span>
+                      <svg
+                        aria-hidden="true"
+                        viewBox="0 0 24 24"
+                        className="text-muted size-5 shrink-0"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="m9 18 6-6-6-6" />
+                      </svg>
+                    </Link>
                   </li>
                 ))}
               </ul>
