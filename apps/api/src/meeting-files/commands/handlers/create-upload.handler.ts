@@ -1,0 +1,54 @@
+import { BadRequestException, HttpException, HttpStatus } from '@nestjs/common';
+import { CommandHandler, ICommandHandler, QueryBus } from '@nestjs/cqrs';
+import type { MeetingFile } from '../../../generated/prisma/client.js';
+import { GetMeetingQuery } from '../../../meetings/index.js';
+import { PrismaService } from '../../../prisma/prisma.service.js';
+import { resolveFileType } from '../../file-types.js';
+import { FilesStorageService } from '../../files-storage.service.js';
+import { CreateUploadCommand } from '../create-upload.command.js';
+
+/** Free space kept on the disk on top of the upload itself. */
+const DISK_RESERVE_BYTES = 512 * 1024 ** 2;
+
+@CommandHandler(CreateUploadCommand)
+export class CreateUploadHandler implements ICommandHandler<CreateUploadCommand> {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly queryBus: QueryBus,
+    private readonly storage: FilesStorageService,
+  ) {}
+
+  async execute({ userId, uploadId, size, metadata }: CreateUploadCommand): Promise<MeetingFile> {
+    const { meetingId, filename, filetype } = metadata;
+    if (!meetingId || !filename) {
+      throw new BadRequestException('Upload metadata must contain meetingId and filename');
+    }
+
+    // Throws 404 for a missing meeting or one owned by somebody else.
+    await this.queryBus.execute(new GetMeetingQuery(userId, meetingId));
+
+    // Keep only the last path segment of whatever the client sent.
+    const originalName = filename.split(/[\\/]/).pop()?.trim() ?? '';
+    const type = originalName ? resolveFileType(originalName, filetype ?? '') : null;
+    if (!type) {
+      throw new BadRequestException('File type is not allowed');
+    }
+
+    if ((await this.storage.freeBytes()) < size + DISK_RESERVE_BYTES) {
+      throw new HttpException('Not enough storage space', HttpStatus.INSUFFICIENT_STORAGE);
+    }
+
+    return this.prisma.meetingFile.create({
+      data: {
+        id: uploadId,
+        meetingId,
+        uploadedById: userId,
+        originalName,
+        mimeType: type.mimeType,
+        kind: type.kind,
+        size: BigInt(size),
+        storageKey: uploadId,
+      },
+    });
+  }
+}

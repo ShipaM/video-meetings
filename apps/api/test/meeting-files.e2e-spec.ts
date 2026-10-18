@@ -196,7 +196,8 @@ describe('Meeting files (e2e)', () => {
       const created = await createUpload(ownerToken, meetingId, data.length).expect(201);
       const location = created.headers.location;
 
-      await patchChunk(ownerToken, location, 100, data.subarray(100)).expect(409);
+      // A small body: tus answers before reading it and closes the connection.
+      await patchChunk(ownerToken, location, 100, data.subarray(100, 110)).expect(409);
     });
 
     it('resumes an interrupted upload from the offset reported by the server', async () => {

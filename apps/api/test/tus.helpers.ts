@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
+import type { Response } from 'supertest';
 
 export const TUS_VERSION = '1.0.0';
 
@@ -53,10 +54,12 @@ export const interruptedPatch = (
 
 /** supertest parser that collects a binary response body into a Buffer. */
 export const binaryParser = (
-  res: NodeJS.ReadableStream,
+  res: Response,
   callback: (err: Error | null, body: Buffer) => void,
 ): void => {
+  // In Node the superagent response is the readable HTTP response stream.
+  const stream = res as unknown as NodeJS.ReadableStream;
   const chunks: Buffer[] = [];
-  res.on('data', (chunk: Buffer) => chunks.push(chunk));
-  res.on('end', () => callback(null, Buffer.concat(chunks)));
+  stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+  stream.on('end', () => callback(null, Buffer.concat(chunks)));
 };
