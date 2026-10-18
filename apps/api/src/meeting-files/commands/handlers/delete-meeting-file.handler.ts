@@ -1,4 +1,4 @@
-import { Logger, NotFoundException } from '@nestjs/common';
+import { NotFoundException } from '@nestjs/common';
 import { CommandHandler, ICommandHandler, QueryBus } from '@nestjs/cqrs';
 import { GetMeetingQuery } from '../../../meetings/index.js';
 import { PrismaService } from '../../../prisma/prisma.service.js';
@@ -7,8 +7,6 @@ import { DeleteMeetingFileCommand } from '../delete-meeting-file.command.js';
 
 @CommandHandler(DeleteMeetingFileCommand)
 export class DeleteMeetingFileHandler implements ICommandHandler<DeleteMeetingFileCommand> {
-  private readonly logger = new Logger(DeleteMeetingFileHandler.name);
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly queryBus: QueryBus,
@@ -36,11 +34,7 @@ export class DeleteMeetingFileHandler implements ICommandHandler<DeleteMeetingFi
     if (count === 0) {
       throw new NotFoundException('File not found');
     }
-    try {
-      await this.storage.remove(file.storageKey);
-    } catch (error) {
-      // The file is gone for every user; only its disk space is left behind.
-      this.logger.warn(`Could not remove the data of deleted file ${fileId}: ${String(error)}`);
-    }
+    // A download still streaming the file may keep it busy (Windows); the orphan sweep retries.
+    await this.storage.removeQuietly(file.storageKey, `deleted file ${fileId}`);
   }
 }

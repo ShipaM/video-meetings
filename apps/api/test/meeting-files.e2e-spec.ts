@@ -1,13 +1,17 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdtemp, readdir, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { Server } from 'node:http';
 import request from 'supertest';
 import { CommandBus } from '@nestjs/cqrs';
 import { AppModule } from './../src/app.module.js';
-import { CleanupAbandonedUploadsCommand } from './../src/meeting-files/commands/index.js';
+import {
+  CleanupAbandonedUploadsCommand,
+  SweepOrphanFilesCommand,
+} from './../src/meeting-files/commands/index.js';
 import { PrismaService } from './../src/prisma/prisma.service.js';
 import {
   TUS_VERSION,
@@ -558,18 +562,21 @@ describe('Meeting files (e2e)', () => {
   });
 
   describe('abandoned upload cleanup', () => {
-    const cleanUp = () => app.get(CommandBus).execute(new CleanupAbandonedUploadsCommand());
+    // The suites share the dev database: the cutoff is far in the past and only rows this suite
+    // moved before it are candidates, so uploads of a developer are never touched.
+    const cutoff = new Date('2000-01-02T00:00:00.000Z');
+    const abandonedAt = new Date('2000-01-01T00:00:00.000Z');
+    const cleanUp = () => app.get(CommandBus).execute(new CleanupAbandonedUploadsCommand(cutoff));
+    const setLastChunkAt = (id: string, lastChunkAt: Date) =>
+      app.get(PrismaService).meetingFile.update({ where: { id }, data: { lastChunkAt } });
 
-    it('removes uploads with no chunk for 24 hours, with their partial data', async () => {
+    it('removes uploads with no chunk since the cutoff, with their partial data', async () => {
       const data = fakeMp4(2 * MiB);
       const created = await createUpload(ownerToken, meetingId, data.length).expect(201);
       const location = created.headers.location;
       const fileId = fileIdOf(location);
       await patchChunk(ownerToken, location, 0, data.subarray(0, MiB)).expect(204);
-      await app.get(PrismaService).meetingFile.update({
-        where: { id: fileId },
-        data: { lastChunkAt: new Date(Date.now() - 25 * 60 * 60 * 1000) },
-      });
+      await setLastChunkAt(fileId, abandonedAt);
 
       expect(await cleanUp()).toBeGreaterThanOrEqual(1);
 
@@ -581,18 +588,11 @@ describe('Meeting files (e2e)', () => {
     });
 
     it('keeps active uploads and completed files', async () => {
-      const prisma = app.get(PrismaService);
       const active = await createUpload(ownerToken, meetingId, 1024).expect(201);
       const activeId = fileIdOf(active.headers.location);
-      await prisma.meetingFile.update({
-        where: { id: activeId },
-        data: { lastChunkAt: new Date(Date.now() - 23 * 60 * 60 * 1000) },
-      });
+      await setLastChunkAt(activeId, new Date('2000-01-03T00:00:00.000Z'));
       const completedId = fileIdOf(await upload(ownerToken, meetingId, fakeMp4(1024)));
-      await prisma.meetingFile.update({
-        where: { id: completedId },
-        data: { lastChunkAt: new Date('2020-01-01T00:00:00.000Z') },
-      });
+      await setLastChunkAt(completedId, abandonedAt);
 
       await cleanUp();
 
@@ -601,6 +601,54 @@ describe('Meeting files (e2e)', () => {
       expect((await listFiles(ownerToken, meetingId)).map((file) => file.id)).toContain(
         completedId,
       );
+    });
+
+    it('completes an upload whose bytes are all stored instead of removing it', async () => {
+      const data = fakeMp4(MiB);
+      const fileId = fileIdOf(await upload(ownerToken, meetingId, data));
+      // A failed completion hook that the client never retried: all bytes stored, row UPLOADING.
+      await app.get(PrismaService).meetingFile.update({
+        where: { id: fileId },
+        data: { status: 'UPLOADING', completedAt: null, lastChunkAt: abandonedAt },
+      });
+
+      await cleanUp();
+
+      const file = (await listFiles(ownerToken, meetingId)).find((item) => item.id === fileId);
+      expect(file).toMatchObject({ status: 'READY', size: data.length });
+      expect(await storedEntries(fileId)).toContain(fileId);
+    });
+  });
+
+  describe('orphan file sweep', () => {
+    const sweep = () => app.get(CommandBus).execute(new SweepOrphanFilesCommand(new Date()));
+
+    it('removes old files without a row and keeps the files of existing rows', async () => {
+      const orphanId = randomUUID();
+      const orphanPath = path.join(filesDir, 'uploads', orphanId);
+      await writeFile(orphanPath, 'left behind');
+      await writeFile(`${orphanPath}.json`, '{}');
+      const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+      await utimes(orphanPath, old, old);
+      await utimes(`${orphanPath}.json`, old, old);
+      const keptId = fileIdOf(await upload(ownerToken, meetingId, fakeMp4(1024)));
+      const pending = await createUpload(ownerToken, meetingId, 1024).expect(201);
+      const pendingId = fileIdOf(pending.headers.location);
+
+      expect(await sweep()).toBeGreaterThanOrEqual(1);
+
+      expect(await storedEntries(orphanId)).toEqual([]);
+      expect(await storedEntries(keptId)).toContain(keptId);
+      expect(await storedEntries(pendingId)).toContain(pendingId);
+    });
+
+    it('keeps a recent file without a row (removal may still be in progress)', async () => {
+      const recentId = randomUUID();
+      await writeFile(path.join(filesDir, 'uploads', recentId), 'just written');
+
+      await app.get(CommandBus).execute(new SweepOrphanFilesCommand());
+
+      expect(await storedEntries(recentId)).toEqual([recentId]);
     });
   });
 

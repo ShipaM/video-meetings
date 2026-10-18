@@ -10,18 +10,18 @@ describe('DeleteMeetingFileHandler', () => {
   const findFirst = vi.fn();
   const deleteMany = vi.fn();
   const execute = vi.fn();
-  const remove = vi.fn();
+  const removeQuietly = vi.fn();
   const handler = new DeleteMeetingFileHandler(
     { meetingFile: { findFirst, deleteMany } } as unknown as PrismaService,
     { execute } as unknown as QueryBus,
-    { remove } as unknown as FilesStorageService,
+    { removeQuietly } as unknown as FilesStorageService,
   );
 
   beforeEach(() => {
     findFirst.mockReset();
     deleteMany.mockReset();
     execute.mockReset();
-    remove.mockReset();
+    removeQuietly.mockReset();
   });
 
   it('checks the meeting, deletes the row and then the stored original', async () => {
@@ -36,8 +36,10 @@ describe('DeleteMeetingFileHandler', () => {
       select: { storageKey: true },
     });
     expect(deleteMany).toHaveBeenCalledWith({ where: { id: 'f1', meetingId: 'm1' } });
-    expect(remove).toHaveBeenCalledWith('k1');
-    expect(deleteMany.mock.invocationCallOrder[0]).toBeLessThan(remove.mock.invocationCallOrder[0]);
+    expect(removeQuietly).toHaveBeenCalledWith('k1', 'deleted file f1');
+    expect(deleteMany.mock.invocationCallOrder[0]).toBeLessThan(
+      removeQuietly.mock.invocationCallOrder[0],
+    );
   });
 
   it('does not touch files of a meeting the caller cannot see (404)', async () => {
@@ -57,7 +59,7 @@ describe('DeleteMeetingFileHandler', () => {
       NotFoundException,
     );
     expect(deleteMany).not.toHaveBeenCalled();
-    expect(remove).not.toHaveBeenCalled();
+    expect(removeQuietly).not.toHaveBeenCalled();
   });
 
   it('answers 404 when a concurrent delete removed the row first', async () => {
@@ -67,16 +69,6 @@ describe('DeleteMeetingFileHandler', () => {
     await expect(handler.execute(new DeleteMeetingFileCommand('u1', 'm1', 'f1'))).rejects.toThrow(
       NotFoundException,
     );
-    expect(remove).not.toHaveBeenCalled();
-  });
-
-  it('still succeeds when the data cannot be removed (the file is gone for users)', async () => {
-    findFirst.mockResolvedValue({ storageKey: 'k1' });
-    deleteMany.mockResolvedValue({ count: 1 });
-    remove.mockRejectedValue(new Error('EBUSY'));
-
-    await expect(
-      handler.execute(new DeleteMeetingFileCommand('u1', 'm1', 'f1')),
-    ).resolves.toBeUndefined();
+    expect(removeQuietly).not.toHaveBeenCalled();
   });
 });

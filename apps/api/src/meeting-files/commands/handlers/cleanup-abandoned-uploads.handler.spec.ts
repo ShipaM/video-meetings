@@ -1,72 +1,106 @@
+import type { CommandBus } from '@nestjs/cqrs';
 import type { PrismaService } from '../../../prisma/prisma.service.js';
 import type { FilesStorageService } from '../../files-storage.service.js';
 import { ABANDONED_UPLOAD_MS } from '../../meeting-files.config.js';
+import { CleanupAbandonedUploadsCommand } from '../cleanup-abandoned-uploads.command.js';
+import { CompleteUploadCommand } from '../complete-upload.command.js';
 import { CleanupAbandonedUploadsHandler } from './cleanup-abandoned-uploads.handler.js';
 
 describe('CleanupAbandonedUploadsHandler', () => {
   const findMany = vi.fn();
   const deleteMany = vi.fn();
-  const remove = vi.fn();
+  const execute = vi.fn();
+  const storedBytes = vi.fn();
+  const removeQuietly = vi.fn();
   const handler = new CleanupAbandonedUploadsHandler(
     { meetingFile: { findMany, deleteMany } } as unknown as PrismaService,
-    { remove } as unknown as FilesStorageService,
+    { execute } as unknown as CommandBus,
+    { storedBytes, removeQuietly } as unknown as FilesStorageService,
   );
+
+  const cutoff = new Date('2026-01-01T00:00:00.000Z');
+  const partial = (id: string) => ({ id, storageKey: `k-${id}`, size: 100n });
 
   beforeEach(() => {
     findMany.mockReset();
     deleteMany.mockReset();
-    remove.mockReset();
+    execute.mockReset();
+    storedBytes.mockReset();
+    removeQuietly.mockReset();
+    storedBytes.mockResolvedValue(40);
+    removeQuietly.mockResolvedValue(true);
   });
 
-  it('looks for UPLOADING files with no chunk for 24 hours', async () => {
-    findMany.mockResolvedValue([]);
+  it('defaults the cutoff to 24 hours ago', () => {
     const before = Date.now();
+    const { cutoff: defaultCutoff } = new CleanupAbandonedUploadsCommand();
 
-    await expect(handler.execute()).resolves.toBe(0);
-
-    const [{ where }] = findMany.mock.calls[0] as [
-      { where: { status: string; lastChunkAt: { lt: Date } } },
-    ];
-    expect(where.status).toBe('UPLOADING');
-    expect(where.lastChunkAt.lt.getTime()).toBeGreaterThanOrEqual(before - ABANDONED_UPLOAD_MS);
-    expect(where.lastChunkAt.lt.getTime()).toBeLessThanOrEqual(Date.now() - ABANDONED_UPLOAD_MS);
+    expect(defaultCutoff.getTime()).toBeGreaterThanOrEqual(before - ABANDONED_UPLOAD_MS);
+    expect(defaultCutoff.getTime()).toBeLessThanOrEqual(Date.now() - ABANDONED_UPLOAD_MS);
   });
 
-  it('deletes each row with the same condition, then its data', async () => {
-    findMany.mockResolvedValue([
-      { id: 'f1', storageKey: 'k1' },
-      { id: 'f2', storageKey: 'k2' },
-    ]);
+  it('deletes each partial upload with the same condition, then its data', async () => {
+    findMany.mockResolvedValue([partial('f1'), partial('f2')]);
     deleteMany.mockResolvedValue({ count: 1 });
 
-    await expect(handler.execute()).resolves.toBe(2);
+    await expect(handler.execute(new CleanupAbandonedUploadsCommand(cutoff))).resolves.toBe(2);
 
-    expect(deleteMany).toHaveBeenCalledWith({
-      where: { id: 'f1', status: 'UPLOADING', lastChunkAt: { lt: expect.any(Date) as Date } },
+    expect(findMany).toHaveBeenCalledWith({
+      where: { status: 'UPLOADING', lastChunkAt: { lt: cutoff } },
+      orderBy: { id: 'asc' },
+      take: 100,
+      select: { id: true, storageKey: true, size: true },
     });
-    expect(remove).toHaveBeenCalledWith('k1');
-    expect(remove).toHaveBeenCalledWith('k2');
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: { id: 'f1', status: 'UPLOADING', lastChunkAt: { lt: cutoff } },
+    });
+    expect(removeQuietly).toHaveBeenCalledWith('k-f1', 'abandoned upload f1');
+    expect(removeQuietly).toHaveBeenCalledWith('k-f2', 'abandoned upload f2');
+  });
+
+  it('reads further batches after the last id', async () => {
+    const full = Array.from({ length: 100 }, (_, i) => partial(`a${String(i).padStart(3, '0')}`));
+    findMany.mockResolvedValueOnce(full).mockResolvedValueOnce([partial('b')]);
+    deleteMany.mockResolvedValue({ count: 1 });
+
+    await expect(handler.execute(new CleanupAbandonedUploadsCommand(cutoff))).resolves.toBe(101);
+
+    expect(findMany).toHaveBeenCalledTimes(2);
+    expect(findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: { status: 'UPLOADING', lastChunkAt: { lt: cutoff }, id: { gt: 'a099' } },
+      }),
+    );
   });
 
   it('keeps the data of an upload that received a chunk meanwhile', async () => {
-    findMany.mockResolvedValue([{ id: 'f1', storageKey: 'k1' }]);
+    findMany.mockResolvedValue([partial('f1')]);
     deleteMany.mockResolvedValue({ count: 0 });
 
-    await expect(handler.execute()).resolves.toBe(0);
+    await expect(handler.execute(new CleanupAbandonedUploadsCommand(cutoff))).resolves.toBe(0);
 
-    expect(remove).not.toHaveBeenCalled();
+    expect(removeQuietly).not.toHaveBeenCalled();
   });
 
-  it('goes on with the other uploads when removing data fails', async () => {
-    findMany.mockResolvedValue([
-      { id: 'f1', storageKey: 'k1' },
-      { id: 'f2', storageKey: 'k2' },
-    ]);
+  it('completes an upload whose bytes are all stored instead of deleting it', async () => {
+    findMany.mockResolvedValue([partial('f1')]);
+    storedBytes.mockResolvedValue(100);
+
+    await expect(handler.execute(new CleanupAbandonedUploadsCommand(cutoff))).resolves.toBe(0);
+
+    expect(execute).toHaveBeenCalledWith(new CompleteUploadCommand('f1'));
+    expect(deleteMany).not.toHaveBeenCalled();
+    expect(removeQuietly).not.toHaveBeenCalled();
+  });
+
+  it('goes on when completing a stalled upload fails', async () => {
+    findMany.mockResolvedValue([partial('f1'), partial('f2')]);
+    storedBytes.mockImplementation((key: string) => Promise.resolve(key === 'k-f1' ? 100 : 40));
+    execute.mockRejectedValue(new Error('database down'));
     deleteMany.mockResolvedValue({ count: 1 });
-    remove.mockRejectedValueOnce(new Error('EBUSY'));
 
-    await expect(handler.execute()).resolves.toBe(2);
+    await expect(handler.execute(new CleanupAbandonedUploadsCommand(cutoff))).resolves.toBe(1);
 
-    expect(remove).toHaveBeenCalledWith('k2');
+    expect(removeQuietly).toHaveBeenCalledWith('k-f2', 'abandoned upload f2');
   });
 });

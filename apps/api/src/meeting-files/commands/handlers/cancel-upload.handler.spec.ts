@@ -15,7 +15,19 @@ describe('CancelUploadHandler', () => {
     deleteMany.mockReset();
   });
 
-  it("hides another user's upload (404) and deletes nothing", async () => {
+  it("deletes the uploader's row in one query while it is UPLOADING", async () => {
+    deleteMany.mockResolvedValue({ count: 1 });
+
+    await handler.execute(new CancelUploadCommand('u1', 'f1'));
+
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: { id: 'f1', uploadedById: 'u1', status: 'UPLOADING' },
+    });
+    expect(findFirst).not.toHaveBeenCalled();
+  });
+
+  it("hides another user's upload (404)", async () => {
+    deleteMany.mockResolvedValue({ count: 0 });
     findFirst.mockResolvedValue(null);
 
     await expect(handler.execute(new CancelUploadCommand('u2', 'f1'))).rejects.toThrow(
@@ -25,21 +37,11 @@ describe('CancelUploadHandler', () => {
       where: { id: 'f1', uploadedById: 'u2' },
       select: { id: true },
     });
-    expect(deleteMany).not.toHaveBeenCalled();
-  });
-
-  it('deletes the row only while the upload is UPLOADING', async () => {
-    findFirst.mockResolvedValue({ id: 'f1' });
-    deleteMany.mockResolvedValue({ count: 1 });
-
-    await handler.execute(new CancelUploadCommand('u1', 'f1'));
-
-    expect(deleteMany).toHaveBeenCalledWith({ where: { id: 'f1', status: 'UPLOADING' } });
   });
 
   it('refuses to cancel a completed upload (409), so tus keeps its data', async () => {
-    findFirst.mockResolvedValue({ id: 'f1' });
     deleteMany.mockResolvedValue({ count: 0 });
+    findFirst.mockResolvedValue({ id: 'f1' });
 
     await expect(handler.execute(new CancelUploadCommand('u1', 'f1'))).rejects.toThrow(
       ConflictException,

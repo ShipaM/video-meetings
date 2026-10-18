@@ -138,11 +138,14 @@ Link tokens are JWTs signed with `FILE_LINK_SECRET` and audience `file-content` 
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `DELETE /meetings/:id/files/:fileId` | bearer token; `204`, removes the row and then the stored original (`DeleteMeetingFileCommand`); links issued earlier then give `404`. `404` foreign/missing meeting or file and for an `UPLOADING` file (cancelled via `DELETE /uploads/:id`), `400` non-UUID |
 
-### Abandoned uploads
+### Abandoned uploads and orphan files
 
-`CleanupAbandonedUploadsCommand` deletes `UPLOADING` rows whose `lastChunkAt` is older than 24 h (`ABANDONED_UPLOAD_MS`; the condition is repeated in the `deleteMany`, so a chunk that arrives meanwhile keeps the upload) and then their data. `AbandonedUploadsScheduler` runs it at startup and every hour (`CLEANUP_INTERVAL_MS`, an `unref`'d in-process timer; it moves to a pg-boss schedule in Phase 7). e2e tests run the command directly through the `CommandBus`.
+`AbandonedUploadsScheduler` runs two commands at startup and every hour (`CLEANUP_INTERVAL_MS`, an `unref`'d in-process timer; it moves to a pg-boss schedule in Phase 7). `FILES_CLEANUP=off` disables it; `vitest.config.e2e.ts` sets that, because the e2e suites share the dev database and point `FILES_DIR` at a temporary directory.
 
-Removal order everywhere (cancel, cleanup, delete, type mismatch): **row first, then data**, so a crash leaves an orphan file, never a row without data. `FilesStorageService.remove` is idempotent (missing files are fine) and retries briefly (Windows `EBUSY`); a failed data removal after the row is gone is only logged. There is no orphan sweep yet, and files of meetings removed by a database cascade (user deletion) stay on disk.
+- `CleanupAbandonedUploadsCommand(cutoff = now - 24 h)` reads `UPLOADING` rows with `lastChunkAt < cutoff` in batches of 100 (keyset pagination by id). An upload whose bytes are all stored only lost its completion, so it is completed (`CompleteUploadCommand`) instead of removed. The others are deleted with the condition repeated in the `deleteMany` (a chunk that arrives meanwhile keeps the upload), then their data. e2e tests pass a cutoff in the year 2000 and move only their own rows before it, so developer uploads in the shared database are never touched.
+- `SweepOrphanFilesCommand(olderThan = now - 1 h)` removes files in `uploads/` (UUID names only) that have no `MeetingFile` row and were last modified before `olderThan` (`ORPHAN_GRACE_MS`). The row is created before tus writes the file, so such a file can never get a row. It covers data whose removal failed after its row was deleted (e.g. Windows `EBUSY` while a download still streams the file, a tus lock timeout on cancel) and files of meetings removed by a database cascade (user deletion).
+
+Removal order everywhere (cancel, cleanup, delete, type mismatch): **row first, then data**, so a crash or a failed removal leaves an orphan file for the sweep, never a row without data. Every data removal is idempotent (missing files are fine) and retries briefly: `FilesStorageService.remove`, and `MeetingFileStore`, the `FileStore` subclass whose `remove` tus calls on cancel. Handlers that have already deleted the row call `FilesStorageService.removeQuietly`, which only logs a failure. Concurrent requests never turn a vanished row into a `500`: `PATCH` updates `lastChunkAt` with a conditional `updateMany` and `CompleteUploadCommand` answers `404` when the upload was cancelled meanwhile.
 
 ### Storage
 
@@ -212,7 +215,7 @@ npm run lint && npx tsc --noEmit && npm run test && npm run test:e2e
 
 ## Environment
 
-Copy `.env.example` to `apps/api/.env` (`DATABASE_URL`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `FILES_DIR`, `FILE_LINK_SECRET`; optional `WEB_ORIGIN` for CORS, default `http://localhost:3000`). Without `FILE_LINK_SECRET` the app refuses to start (`MeetingFilesModule.onModuleInit`). `main.ts` loads it through `dotenv/config`; e2e tests load it via `setupFiles` in `vitest.config.e2e.ts`. The generated client (`src/generated`) is git-ignored. e2e tests need the database (`npm run db:up`, then `npm run prisma:migrate`) and delete the users they create in `afterAll`.
+Copy `.env.example` to `apps/api/.env` (`DATABASE_URL`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `FILES_DIR`, `FILE_LINK_SECRET`; optional `WEB_ORIGIN` for CORS, default `http://localhost:3000`, and `FILES_CLEANUP=off` to disable the scheduled storage cleanup). Without `FILE_LINK_SECRET` the app refuses to start (`MeetingFilesModule.onModuleInit`). `main.ts` loads it through `dotenv/config`; e2e tests load it via `setupFiles` in `vitest.config.e2e.ts`. The generated client (`src/generated`) is git-ignored. e2e tests need the database (`npm run db:up`, then `npm run prisma:migrate`) and delete the users they create in `afterAll`.
 
 ## Documentation
 
