@@ -41,12 +41,12 @@ the meeting's file list and download the original. Files live on local disk, out
 **Affects:** frontend
 **Tasks**
 
-- [ ] Meetings on the home page link to `/meetings/[id]`; the page shows title, date and the file list (name, type,
+- [x] Meetings on the home page link to `/meetings/[id]`; the page shows title, date and the file list (name, type,
       size, upload date, status, download); `404` from the API shows "not found".
-- [ ] Upload area with file picker and drag-and-drop, several files at once, a progress bar per file, using the
+- [x] Upload area with file picker and drag-and-drop, several files at once, a progress bar per file, using the
       resumable protocol from Phase 1.
-- [ ] Client-side rejection before upload of disallowed types and files over 2 GB, with a message naming the reason.
-- [ ] Apply `ui-ux-pro-max`, check the page at phone width, visual check through Playwright MCP; update
+- [x] Client-side rejection before upload of disallowed types and files over 2 GB, with a message naming the reason.
+- [x] Apply `ui-ux-pro-max`, check the page at phone width, visual check through Playwright MCP; update
       `apps/web/CLAUDE.md`.
       **Done when:** in the browser the owner opens a meeting from the home page, uploads several files via picker and
       drag-and-drop with per-file progress, sees them in the list and downloads one; a disallowed / too large file is
