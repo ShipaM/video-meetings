@@ -5,7 +5,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { Server } from 'node:http';
 import request from 'supertest';
+import { CommandBus } from '@nestjs/cqrs';
 import { AppModule } from './../src/app.module.js';
+import { CleanupAbandonedUploadsCommand } from './../src/meeting-files/commands/index.js';
 import { PrismaService } from './../src/prisma/prisma.service.js';
 import {
   TUS_VERSION,
@@ -124,6 +126,16 @@ describe('Meeting files (e2e)', () => {
     request(server()).post(`/meetings/${meetingId}/files/${fileId}/link`).set(auth(token));
 
   const download = (url: string) => request(server()).get(url).buffer(true).parse(binaryParser);
+
+  const cancelUpload = (token: string, location: string) =>
+    request(server()).delete(location).set(tus(token));
+
+  const deleteFile = (token: string, meeting: string, fileId: string) =>
+    request(server()).delete(`/meetings/${meeting}/files/${fileId}`).set(auth(token));
+
+  /** Names in the storage directory that belong to a file (its data and its tus metadata). */
+  const storedEntries = async (fileId: string): Promise<string[]> =>
+    (await readdir(path.join(filesDir, 'uploads'))).filter((name) => name.startsWith(fileId));
 
   let ownerToken: string;
   let otherToken: string;
@@ -442,6 +454,201 @@ describe('Meeting files (e2e)', () => {
       const token = new URL((link.body as LinkBody).url, 'http://x').searchParams.get('token');
 
       await request(server()).get(`/files/${second}/content?token=${token}`).expect(401);
+    });
+  });
+
+  describe('cancel an upload (tus termination)', () => {
+    it('removes the upload and its partial data', async () => {
+      const data = fakeMp4(2 * MiB);
+      const created = await createUpload(ownerToken, meetingId, data.length).expect(201);
+      const location = created.headers.location;
+      const fileId = fileIdOf(location);
+      await patchChunk(ownerToken, location, 0, data.subarray(0, MiB)).expect(204);
+      expect(await storedEntries(fileId)).not.toHaveLength(0);
+
+      await cancelUpload(ownerToken, location).expect(204);
+
+      expect(await storedEntries(fileId)).toEqual([]);
+      expect(await app.get(PrismaService).meetingFile.findUnique({ where: { id: fileId } })).toBe(
+        null,
+      );
+      await request(server()).head(location).set(tus(ownerToken)).expect(404);
+      // A small body: tus answers before reading it and closes the connection.
+      await patchChunk(ownerToken, location, MiB, data.subarray(MiB, MiB + 10)).expect(404);
+      expect((await listFiles(ownerToken, meetingId)).map((file) => file.id)).not.toContain(fileId);
+    });
+
+    it('cancels an upload that has received no data yet', async () => {
+      const created = await createUpload(ownerToken, meetingId, 1024).expect(201);
+      const fileId = fileIdOf(created.headers.location);
+
+      await cancelUpload(ownerToken, created.headers.location).expect(204);
+
+      expect(await storedEntries(fileId)).toEqual([]);
+    });
+
+    it('does not cancel a completed upload (409) and keeps the file', async () => {
+      const data = fakeMp4(1024);
+      const location = await upload(ownerToken, meetingId, data);
+      const fileId = fileIdOf(location);
+
+      await cancelUpload(ownerToken, location).expect(409);
+
+      expect(await storedEntries(fileId)).toContain(fileId);
+      const link = await requestLink(ownerToken, meetingId, fileId).expect(201);
+      const res = await download((link.body as LinkBody).url).expect(200);
+      expect(sha256(res.body as Buffer)).toBe(sha256(data));
+    });
+
+    it("hides another user's upload (404) and keeps its data", async () => {
+      const created = await createUpload(ownerToken, meetingId, 1024).expect(201);
+      const location = created.headers.location;
+
+      await cancelUpload(otherToken, location).expect(404);
+
+      expect(await headOffset(ownerToken, location)).toBe(0);
+    });
+
+    it('rejects a cancel without a token (401)', async () => {
+      const created = await createUpload(ownerToken, meetingId, 1024).expect(201);
+
+      await request(server())
+        .delete(created.headers.location)
+        .set('Tus-Resumable', TUS_VERSION)
+        .expect(401);
+    });
+  });
+
+  describe('resume after an interrupted chunk', () => {
+    it('continues a later chunk from the stored offset', async () => {
+      const data = fakeMp4(4 * MiB + 11);
+      const created = await createUpload(ownerToken, meetingId, data.length, 'Later.mp4').expect(
+        201,
+      );
+      const location = created.headers.location;
+      await patchChunk(ownerToken, location, 0, data.subarray(0, MiB)).expect(204);
+
+      // The second chunk is cut by the network after part of it has arrived.
+      await interruptedPatch(
+        server(),
+        location,
+        {
+          ...tus(ownerToken),
+          'Upload-Offset': String(MiB),
+          'Content-Type': 'application/offset+octet-stream',
+        },
+        data.subarray(MiB, 3 * MiB),
+        MiB / 2,
+      );
+
+      const offset = await headOffset(ownerToken, location);
+      expect(offset).toBeGreaterThan(MiB);
+      expect(offset).toBeLessThan(3 * MiB);
+      // The stored offset is authoritative: resending from the start of the chunk is refused.
+      await patchChunk(ownerToken, location, MiB, data.subarray(MiB, MiB + 10)).expect(409);
+
+      for (let from = offset; from < data.length; from += MiB) {
+        await patchChunk(ownerToken, location, from, data.subarray(from, from + MiB)).expect(204);
+      }
+
+      const link = await requestLink(ownerToken, meetingId, fileIdOf(location)).expect(201);
+      const res = await download((link.body as LinkBody).url).expect(200);
+      expect(sha256(res.body as Buffer)).toBe(sha256(data));
+    });
+  });
+
+  describe('abandoned upload cleanup', () => {
+    const cleanUp = () => app.get(CommandBus).execute(new CleanupAbandonedUploadsCommand());
+
+    it('removes uploads with no chunk for 24 hours, with their partial data', async () => {
+      const data = fakeMp4(2 * MiB);
+      const created = await createUpload(ownerToken, meetingId, data.length).expect(201);
+      const location = created.headers.location;
+      const fileId = fileIdOf(location);
+      await patchChunk(ownerToken, location, 0, data.subarray(0, MiB)).expect(204);
+      await app.get(PrismaService).meetingFile.update({
+        where: { id: fileId },
+        data: { lastChunkAt: new Date(Date.now() - 25 * 60 * 60 * 1000) },
+      });
+
+      expect(await cleanUp()).toBeGreaterThanOrEqual(1);
+
+      expect(await storedEntries(fileId)).toEqual([]);
+      expect(await app.get(PrismaService).meetingFile.findUnique({ where: { id: fileId } })).toBe(
+        null,
+      );
+      await request(server()).head(location).set(tus(ownerToken)).expect(404);
+    });
+
+    it('keeps active uploads and completed files', async () => {
+      const prisma = app.get(PrismaService);
+      const active = await createUpload(ownerToken, meetingId, 1024).expect(201);
+      const activeId = fileIdOf(active.headers.location);
+      await prisma.meetingFile.update({
+        where: { id: activeId },
+        data: { lastChunkAt: new Date(Date.now() - 23 * 60 * 60 * 1000) },
+      });
+      const completedId = fileIdOf(await upload(ownerToken, meetingId, fakeMp4(1024)));
+      await prisma.meetingFile.update({
+        where: { id: completedId },
+        data: { lastChunkAt: new Date('2020-01-01T00:00:00.000Z') },
+      });
+
+      await cleanUp();
+
+      expect(await headOffset(ownerToken, active.headers.location)).toBe(0);
+      expect(await storedEntries(completedId)).toContain(completedId);
+      expect((await listFiles(ownerToken, meetingId)).map((file) => file.id)).toContain(
+        completedId,
+      );
+    });
+  });
+
+  describe('DELETE /meetings/:id/files/:fileId', () => {
+    it('removes the file, its stored original, its list entry and its download links', async () => {
+      const location = await upload(ownerToken, meetingId, fakeMp4(MiB), 'Delete me.mp4');
+      const fileId = fileIdOf(location);
+      const link = await requestLink(ownerToken, meetingId, fileId).expect(201);
+
+      await deleteFile(ownerToken, meetingId, fileId).expect(204);
+
+      expect(await storedEntries(fileId)).toEqual([]);
+      expect((await listFiles(ownerToken, meetingId)).map((file) => file.id)).not.toContain(fileId);
+      await requestLink(ownerToken, meetingId, fileId).expect(404);
+      // A link issued before the delete stops working although its token has not expired.
+      await download((link.body as LinkBody).url).expect(404);
+      await deleteFile(ownerToken, meetingId, fileId).expect(404);
+    });
+
+    it('does not delete an upload in progress (404); it is cancelled through tus', async () => {
+      const created = await createUpload(ownerToken, meetingId, 1024).expect(201);
+
+      await deleteFile(ownerToken, meetingId, fileIdOf(created.headers.location)).expect(404);
+
+      expect(await headOffset(ownerToken, created.headers.location)).toBe(0);
+    });
+
+    it("hides another user's file (404) and keeps it", async () => {
+      const location = await upload(otherToken, foreignMeetingId, fakeMp4(1024));
+      const fileId = fileIdOf(location);
+
+      await deleteFile(ownerToken, foreignMeetingId, fileId).expect(404);
+      await deleteFile(ownerToken, meetingId, fileId).expect(404);
+
+      expect(await storedEntries(fileId)).toContain(fileId);
+      expect((await listFiles(otherToken, foreignMeetingId)).map((file) => file.id)).toContain(
+        fileId,
+      );
+    });
+
+    it('rejects a non-UUID id (400)', async () => {
+      await deleteFile(ownerToken, meetingId, 'not-a-uuid').expect(400);
+    });
+
+    it('rejects a request without a token (401)', async () => {
+      await request(server())
+        .delete(`/meetings/${meetingId}/files/00000000-0000-4000-8000-000000000000`)
+        .expect(401);
     });
   });
 });
