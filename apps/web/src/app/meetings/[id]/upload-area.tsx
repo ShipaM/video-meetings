@@ -3,7 +3,7 @@
 import { Button, CloseButton, ProgressBar } from '@heroui/react';
 import { useRef, useState } from 'react';
 import { formatFileSize } from '../../meetings';
-import { ACCEPT_ATTRIBUTE, ALLOWED_TYPES_LABEL } from './constants';
+import { ACCEPT_ATTRIBUTE, ALLOWED_TYPES_LABEL, UPLOAD_STATUS_TEXT } from './constants';
 import { useFileUploads, type UploadItem } from './use-file-uploads';
 
 function UploadIcon() {
@@ -25,14 +25,6 @@ function UploadIcon() {
   );
 }
 
-const STATUS_TEXT: Record<UploadItem['status'], string> = {
-  rejected: 'Not uploaded',
-  queued: 'Waiting…',
-  uploading: 'Uploading',
-  done: 'Uploaded',
-  failed: 'Upload failed',
-};
-
 function UploadRow({ item, onDismiss }: { item: UploadItem; onDismiss: () => void }) {
   const hasError = item.status === 'rejected' || item.status === 'failed';
 
@@ -46,7 +38,7 @@ function UploadRow({ item, onDismiss }: { item: UploadItem; onDismiss: () => voi
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="font-medium break-all">{item.name}</span>
           <span className="text-muted text-sm">
-            {formatFileSize(item.size)} · {STATUS_TEXT[item.status]}
+            {formatFileSize(item.size)} · {UPLOAD_STATUS_TEXT[item.status]}
           </span>
         </div>
         {hasError && <CloseButton aria-label={`Dismiss ${item.name}`} onPress={onDismiss} />}

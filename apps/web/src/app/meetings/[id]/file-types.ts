@@ -1,6 +1,7 @@
 import { ALLOWED_TYPES, ALLOWED_TYPES_LABEL, MAX_FILE_SIZE, UNKNOWN_MIME_TYPES } from './constants';
 
-function getExtension(fileName: string): string {
+/** Lower-case extension without the dot, or `` when the name has none. */
+export function getExtension(fileName: string): string {
   const dot = fileName.lastIndexOf('.');
   return dot > 0 ? fileName.slice(dot + 1).toLowerCase() : '';
 }

@@ -1,3 +1,6 @@
+import type { MeetingFileKind, MeetingFileStatus } from '../../meetings';
+import type { UploadItem } from './use-file-uploads';
+
 /** 2 GiB, the PRD limit for a single file (same value as `MAX_FILE_SIZE` in the API). */
 export const MAX_FILE_SIZE = 2 * 1024 ** 3;
 
@@ -52,3 +55,33 @@ export const ACCEPT_ATTRIBUTE = ALLOWED_TYPES.flatMap((entry) => [
 
 /** Shown in the upload area and in rejection messages. */
 export const ALLOWED_TYPES_LABEL = 'MP3, M4A, WAV, WEBM, MP4, MOV, PDF, DOCX, PPTX, TXT, PNG, JPEG';
+
+export const FILE_KIND_LABEL: Record<MeetingFileKind, string> = {
+  AUDIO: 'Audio',
+  VIDEO: 'Video',
+  DOCUMENT: 'Document',
+  IMAGE: 'Image',
+};
+
+/** Label and chip colour of a stored file's status. */
+export const FILE_STATUS: Record<
+  MeetingFileStatus,
+  { label: string; color: 'default' | 'accent' | 'success' | 'danger' }
+> = {
+  UPLOADING: { label: 'Uploading', color: 'default' },
+  PROCESSING: { label: 'Processing', color: 'accent' },
+  READY: { label: 'Ready', color: 'success' },
+  FAILED: { label: 'Failed', color: 'danger' },
+};
+
+/** Status text of an upload row. */
+export const UPLOAD_STATUS_TEXT: Record<UploadItem['status'], string> = {
+  rejected: 'Not uploaded',
+  queued: 'Waiting…',
+  uploading: 'Uploading',
+  done: 'Uploaded',
+  failed: 'Upload failed',
+};
+
+/** Shown on an upload stopped because the session ended. */
+export const SESSION_EXPIRED_MESSAGE = 'Your session has expired. Sign in again to upload.';

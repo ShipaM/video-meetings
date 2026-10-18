@@ -2,7 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { DetailedError, Upload } from 'tus-js-client';
 import { clearAccessToken, getAccessToken } from '../../auth-storage';
 import { API_URL } from '../../constants';
-import { MAX_PARALLEL_UPLOADS, UPLOAD_CHUNK_SIZE, UPLOAD_RETRY_DELAYS } from './constants';
+import {
+  MAX_PARALLEL_UPLOADS,
+  SESSION_EXPIRED_MESSAGE,
+  UPLOAD_CHUNK_SIZE,
+  UPLOAD_RETRY_DELAYS,
+} from './constants';
 import { getRejectionReason } from './file-types';
 
 export type UploadItem = {
@@ -66,14 +71,25 @@ export function useFileUploads(meetingId: string, onUploaded: () => Promise<void
   // `startNext` and the tus callbacks refer to each other, so the latest one lives in a ref.
   const startNextRef = useRef<() => void>(() => {});
 
+  /** The session ended: queued files will not start, so mark them failed instead of waiting. */
+  const failQueued = useCallback(() => {
+    const keys = new Set(queue.current.map((queued) => queued.key));
+    queue.current = [];
+    setItems((current) =>
+      current.map((item) =>
+        keys.has(item.key) ? { ...item, status: 'failed', error: SESSION_EXPIRED_MESSAGE } : item,
+      ),
+    );
+  }, []);
+
   const startNext = useCallback(() => {
+    if (queue.current.length > 0 && !getAccessToken()) {
+      failQueued();
+      clearAccessToken();
+      return;
+    }
     while (running.current.size < MAX_PARALLEL_UPLOADS && queue.current.length > 0) {
       const { key, file } = queue.current.shift()!;
-      const token = getAccessToken();
-      if (!token) {
-        clearAccessToken();
-        return;
-      }
 
       const finish = () => {
         running.current.delete(key);
@@ -87,18 +103,22 @@ export function useFileUploads(meetingId: string, onUploaded: () => Promise<void
         // Resume only within this page session; after a reload the file is picked again.
         storeFingerprintForResuming: false,
         removeFingerprintOnSuccess: true,
-        headers: { Authorization: `Bearer ${token}` },
+        // Read for every request, so a long upload follows a token change in another tab.
+        onBeforeRequest: (request) => {
+          request.setHeader('Authorization', `Bearer ${getAccessToken() ?? ''}`);
+        },
         metadata: { meetingId, filename: file.name, filetype: file.type },
         onProgress: (sent, total) => {
           update(key, { progress: total > 0 ? sent / total : 0 });
         },
         onError: (error) => {
-          finish();
           if (isUnauthorized(error)) {
+            update(key, { status: 'failed', error: SESSION_EXPIRED_MESSAGE });
             clearAccessToken(); // expired token: back to the login page
-            return;
+          } else {
+            update(key, { status: 'failed', error: getUploadError(error) });
           }
-          update(key, { status: 'failed', error: getUploadError(error) });
+          finish();
         },
         onSuccess: () => {
           finish();
@@ -111,7 +131,7 @@ export function useFileUploads(meetingId: string, onUploaded: () => Promise<void
       update(key, { status: 'uploading' });
       upload.start();
     }
-  }, [meetingId, update, remove]);
+  }, [meetingId, update, remove, failQueued]);
 
   useEffect(() => {
     startNextRef.current = startNext;
@@ -150,8 +170,6 @@ export function useFileUploads(meetingId: string, onUploaded: () => Promise<void
     [startNext],
   );
 
-  /** Hides a rejected or failed item. */
-  const dismiss = useCallback((key: string) => remove(key), [remove]);
-
-  return { items, addFiles, dismiss };
+  // `dismiss` hides a rejected or failed item.
+  return { items, addFiles, dismiss: remove };
 }

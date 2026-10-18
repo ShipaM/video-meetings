@@ -1,3 +1,5 @@
+import { FILE_SIZE_UNITS } from './constants';
+
 export type Meeting = {
   id: string;
   title: string;
@@ -29,17 +31,24 @@ export function formatMeetingDate(iso: string): string {
   return dateFormat.format(new Date(iso));
 }
 
-const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'];
+/** Rounds `value` for display in `unit`; GB rounds up so a size over a limit never reads as it. */
+function roundSize(value: number, unit: number): { value: number; digits: number } {
+  const isGb = FILE_SIZE_UNITS[unit] === 'GB';
+  const digits = unit === 0 || Math.round(value * 10) / 10 >= 100 ? 0 : isGb ? 2 : 1;
+  const factor = 10 ** digits;
+  const scaled = value * factor;
+  return { value: (isGb ? Math.ceil(scaled) : Math.round(scaled)) / factor, digits };
+}
 
 /** Human-readable size in binary units (1 KB = 1024 B), e.g. `1.5 MB`. */
 export function formatFileSize(bytes: number): string {
   let value = bytes;
   let unit = 0;
-  while (value >= 1024 && unit < SIZE_UNITS.length - 1) {
+  // Move up a unit when rounding would print 1024 or more, e.g. 1,048,575 B is `1.0 MB`.
+  while (unit < FILE_SIZE_UNITS.length - 1 && roundSize(value, unit).value >= 1024) {
     value /= 1024;
     unit += 1;
   }
-  // Two decimals for GB, so a file just over the 2 GB limit does not read as "2.0 GB".
-  const digits = unit === 0 || value >= 100 ? 0 : SIZE_UNITS[unit] === 'GB' ? 2 : 1;
-  return `${value.toFixed(digits)} ${SIZE_UNITS[unit]}`;
+  const rounded = roundSize(value, unit);
+  return `${rounded.value.toFixed(rounded.digits)} ${FILE_SIZE_UNITS[unit]}`;
 }

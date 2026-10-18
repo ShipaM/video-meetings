@@ -18,3 +18,6 @@ export const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 export const EMAIL_MAX_LENGTH = 254;
 export const RECENT_MEETINGS_COUNT = 3;
 export const MEETING_TITLE_MAX_LENGTH = 200;
+
+/** File size units in binary steps (1 KB = 1024 B). */
+export const FILE_SIZE_UNITS = ['B', 'KB', 'MB', 'GB'];

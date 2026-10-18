@@ -4,36 +4,14 @@ import { Button, Chip } from '@heroui/react';
 import { useState } from 'react';
 import { clearAccessToken, getAccessToken } from '../../auth-storage';
 import { API_URL } from '../../constants';
-import {
-  formatFileSize,
-  formatMeetingDate,
-  type MeetingFile,
-  type MeetingFileKind,
-  type MeetingFileStatus,
-} from '../../meetings';
-
-const KIND_LABEL: Record<MeetingFileKind, string> = {
-  AUDIO: 'Audio',
-  VIDEO: 'Video',
-  DOCUMENT: 'Document',
-  IMAGE: 'Image',
-};
-
-const STATUS: Record<
-  MeetingFileStatus,
-  { label: string; color: 'default' | 'accent' | 'success' | 'danger' }
-> = {
-  UPLOADING: { label: 'Uploading', color: 'default' },
-  PROCESSING: { label: 'Processing', color: 'accent' },
-  READY: { label: 'Ready', color: 'success' },
-  FAILED: { label: 'Failed', color: 'danger' },
-};
+import { formatFileSize, formatMeetingDate, type MeetingFile } from '../../meetings';
+import { FILE_KIND_LABEL, FILE_STATUS } from './constants';
+import { getExtension } from './file-types';
 
 /** Extension in upper case for display, e.g. `PDF`; falls back to the file kind. */
 function getTypeLabel(file: MeetingFile): string {
-  const dot = file.originalName.lastIndexOf('.');
-  const extension = dot > 0 ? file.originalName.slice(dot + 1).toUpperCase() : '';
-  return extension ? `${KIND_LABEL[file.kind]} · ${extension}` : KIND_LABEL[file.kind];
+  const extension = getExtension(file.originalName).toUpperCase();
+  return extension ? `${FILE_KIND_LABEL[file.kind]} · ${extension}` : FILE_KIND_LABEL[file.kind];
 }
 
 /** Asks the API for a short-lived signed link and lets the browser download it. */
@@ -72,7 +50,7 @@ async function downloadFile(file: MeetingFile): Promise<string | null> {
 function FileRow({ file }: { file: MeetingFile }) {
   const [isPending, setIsPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const status = STATUS[file.status];
+  const status = FILE_STATUS[file.status];
 
   async function handleDownload() {
     setIsPending(true);

@@ -3,7 +3,7 @@
 import { Alert, Card, Skeleton, buttonVariants } from '@heroui/react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { clearAccessToken, useAccessToken } from '../../auth-storage';
 import { API_URL } from '../../constants';
 import { formatMeetingDate, type Meeting, type MeetingFile } from '../../meetings';
@@ -48,6 +48,23 @@ async function fetchMeeting(
   }
 }
 
+type FilesResult =
+  { type: 'files'; files: MeetingFile[] } | { type: 'unauthorized' } | { type: 'error' };
+
+/** Only the file list changes after an upload, so a refresh skips the meeting itself. */
+async function fetchFiles(token: string, meetingId: string): Promise<FilesResult> {
+  try {
+    const response = await fetch(`${API_URL}/meetings/${meetingId}/files`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (response.status === 401) return { type: 'unauthorized' };
+    if (!response.ok) return { type: 'error' };
+    return { type: 'files', files: (await response.json()) as MeetingFile[] };
+  } catch {
+    return { type: 'error' };
+  }
+}
+
 const backLinkClass = buttonVariants({ variant: 'secondary', className: 'w-full sm:w-auto' });
 
 export function MeetingView({ meetingId }: { meetingId: string }) {
@@ -76,13 +93,28 @@ export function MeetingView({ meetingId }: { meetingId: string }) {
     return () => controller.abort();
   }, [token, meetingId, applyResult]);
 
-  /** Reloads the meeting and its files after an upload; keeps the page if the reload fails. */
-  const refresh = useCallback(async () => {
-    if (!token) return;
-    const result = await fetchMeeting(token, meetingId);
-    if (result.type === 'error') return;
-    applyResult(result);
-  }, [token, meetingId, applyResult]);
+  // Uploads finishing close together refresh concurrently; only the latest request may apply,
+  // and an older one resolves when the latest has applied (so its upload row is removed then).
+  const refreshId = useRef(0);
+  const latestRefresh = useRef<Promise<void>>(Promise.resolve());
+
+  /** Reloads the file list after an upload; keeps the page if the reload fails. */
+  const refresh = useCallback((): Promise<void> => {
+    if (!token) return Promise.resolve();
+    const id = ++refreshId.current;
+    const run = fetchFiles(token, meetingId).then((result) => {
+      if (id !== refreshId.current) return latestRefresh.current;
+      if (result.type === 'unauthorized') {
+        clearAccessToken();
+      } else if (result.type === 'files') {
+        setState((current) =>
+          current.type === 'ready' ? { ...current, files: result.files } : current,
+        );
+      }
+    });
+    latestRefresh.current = run;
+    return run;
+  }, [token, meetingId]);
 
   if (!token) return <main className="flex flex-1" aria-busy="true" />;
 
