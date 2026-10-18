@@ -14,15 +14,15 @@ Create an implementation plan and save it to 'docs/plan-$ARGUMENTS.md' (use an E
 
 ## Plan: {feature name}
 
-**PRD:** $ARGUMENTS
+**PRD**: $ARGUMENTS
 **Date**: {current date}
 
 ## Implementation phases
 
 ### Phase 1: {name}
 
-**Goal:** What this phase delivers
-**Affects:** backend / frontend / database
+**Goal**: What this phase delivers
+**Affects**: backend / frontend / database
 **Tasks**
 
 - [ ] Task 1
