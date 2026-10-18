@@ -6,6 +6,7 @@ import { Server, type ServerOptions } from '@tus/server';
 import type { AuthenticatedRequest } from '../auth/jwt-auth.guard.js';
 import {
   AuthorizeUploadRequestCommand,
+  CancelUploadCommand,
   CompleteUploadCommand,
   CreateUploadCommand,
 } from './commands/index.js';
@@ -46,7 +47,8 @@ function userIdOf(req: TusRequest): string {
 }
 
 /**
- * The tus 1.0 server (creation, core protocol) for meeting file uploads, mounted under `/uploads`.
+ * The tus 1.0 server (creation, termination, core protocol) for meeting file uploads, mounted under
+ * `/uploads`.
  * Its hooks only dispatch CQRS messages; the upload id is the `MeetingFile` id.
  */
 @Injectable()
@@ -64,7 +66,10 @@ export class TusService {
       onIncomingRequest: (req, uploadId) =>
         tusHook(async () => {
           // POST creates the upload; its checks live in onUploadCreate.
-          if (req.method !== 'POST') {
+          if (req.method === 'DELETE') {
+            // Cancel (termination): the row goes here, tus then removes the data under its lock.
+            await commandBus.execute(new CancelUploadCommand(userIdOf(req), uploadId));
+          } else if (req.method !== 'POST') {
             await commandBus.execute(
               new AuthorizeUploadRequestCommand(userIdOf(req), uploadId, req.method),
             );

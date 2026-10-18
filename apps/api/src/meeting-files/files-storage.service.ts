@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { stat, statfs } from 'node:fs/promises';
+import { rm, stat, statfs } from 'node:fs/promises';
 import path from 'node:path';
 import { FileStore } from '@tus/file-store';
 import { resolveFilesDir } from './meeting-files.config.js';
@@ -18,9 +18,16 @@ export class FilesStorageService {
     return path.join(this.uploadsDir, storageKey);
   }
 
-  /** Removes the data file and its tus metadata. */
-  remove(storageKey: string): Promise<void> {
-    return this.store.remove(storageKey);
+  /**
+   * Removes the data file and its tus metadata (`<key>.json`, the `FileStore` default). Idempotent:
+   * missing files are fine, unlike `FileStore.remove`, which keeps the metadata when the data is gone.
+   * Retries cover Windows, where a file still open by a download stream may be briefly busy.
+   */
+  async remove(storageKey: string): Promise<void> {
+    const dataPath = this.pathOf(storageKey);
+    await Promise.all(
+      [dataPath, `${dataPath}.json`].map((file) => rm(file, { force: true, maxRetries: 3 })),
+    );
   }
 
   async freeBytes(): Promise<number> {

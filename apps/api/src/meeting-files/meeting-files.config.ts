@@ -32,3 +32,6 @@ export function fileLinkSecret(): string {
 
 /** An upload with no chunk for this long counts as abandoned (PRD: 24 hours after the last part). */
 export const ABANDONED_UPLOAD_MS = 24 * 60 * 60 * 1000;
+
+/** How often abandoned uploads are looked for. */
+export const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
