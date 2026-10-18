@@ -5,11 +5,11 @@
 
 ## Open questions carried over from the PRD
 
-- **AI provider(s)** for transcription and summarization are not chosen. The plan puts them behind `Transcriber` /
-  `Summarizer` interfaces with a fake implementation for tests; the real adapter is wired in once the provider is
-  chosen (its data retention and training terms must be acceptable for private meeting content).
+- **AI processing** is decided: transcription and summarization run locally on the API server (whisper.cpp and a
+  local LLM through Ollama, see [research-meeting-upload.md](research-meeting-upload.md)), so no meeting content
+  leaves the server. They stay behind `Transcriber` / `Summarizer` interfaces with a fake implementation for tests.
 - **Maximum recording length** is not decided. The plan makes it a configurable limit (`MAX_RECORDING_MINUTES`);
-  the default value must be agreed before Phase 9 is closed.
+  the default value must be agreed before Phase 9 is closed, based on the measured local transcription speed.
 
 ## Implementation phases
 
@@ -20,18 +20,18 @@ the meeting's file list and download the original. Files live on local disk, out
 **Affects:** backend / database
 **Tasks**
 
-- [ ] Prisma `MeetingFile` model (meeting `onDelete: Cascade`, original name, MIME type, size, uploaded by, upload
+- [x] Prisma `MeetingFile` model (meeting `onDelete: Cascade`, original name, MIME type, size, uploaded by, upload
       time, status `UPLOADING | PROCESSING | READY | FAILED`, failure reason, storage key) and a migration; configurable
       storage directory (`FILES_DIR` in `apps/api/.env.example`), never served statically.
-- [ ] e2e tests first (`test/meeting-files.e2e-spec.ts`): chunked upload, resume from the reported offset, list,
+- [x] e2e tests first (`test/meeting-files.e2e-spec.ts`): chunked upload, resume from the reported offset, list,
       byte-for-byte download with the original name, `400` for a disallowed type, `413` for a declared size over 2 GB,
       `404` for a foreign meeting/file, `401` without a token.
-- [ ] `MeetingFilesModule` (CQRS): create an upload (validates the type allow-list and the 2 GB limit), report the
+- [x] `MeetingFilesModule` (CQRS): create an upload (validates the type allow-list and the 2 GB limit), report the
       received offset, append a chunk at an offset, complete the upload; until completion the file is `UPLOADING` and
       is not returned by the list. In this phase a completed file becomes `READY`.
-- [ ] `GET /meetings/:id/files` (completed files only) and download: a short-lived signed download URL issued to an
+- [x] `GET /meetings/:id/files` (completed files only) and download: a short-lived signed download URL issued to an
       authorised caller, streamed with `Content-Disposition` carrying the original file name (no permanent public URL).
-- [ ] Update `apps/api/CLAUDE.md` (module, routes, `FILES_DIR`).
+- [x] Update `apps/api/CLAUDE.md` (module, routes, `FILES_DIR`).
       **Done when:** the new e2e suite and the existing suites are green, and a 2 GB video uploaded with a script
       appears in the list with the correct name, size and type and downloads identical to the original.
 
@@ -122,16 +122,16 @@ retried; images are `READY` right away.
 **Tasks**
 
 - [ ] Background processing that does not block requests: a completed document becomes `PROCESSING`, an image `READY`;
-      every job has a timeout so an external error or hang ends in `FAILED` with a short reason.
-- [ ] Text extraction for PDF, DOCX, PPTX and TXT; `Summarizer` interface with a fake for tests and an adapter for
-      the chosen provider (configured through env); summary stored in a migration-backed table.
+      every job has a timeout so an error or hang of the local model ends in `FAILED` with a short reason.
+- [ ] Text extraction for PDF, DOCX, PPTX and TXT; `Summarizer` interface with a fake for tests and a local Ollama
+      adapter (URL, model and context size configured through env); summary stored in a migration-backed table.
 - [ ] File details route returns status, failure reason and summary; `POST /meetings/:id/files/:fileId/retry` (owner
       only, `FAILED` files only).
 - [ ] Deleting a file in `PROCESSING` removes it and its results, and the finishing job does not recreate them.
 - [ ] e2e tests first with the fake summarizer: success to `READY` with a summary, failure to `FAILED` with a reason,
       retry to `READY`, delete during processing, participant `403` on retry; update `apps/api/CLAUDE.md`.
       **Done when:** the e2e suites are green and a real PDF, DOCX, PPTX and TXT reach `READY` with a summary through the
-      configured provider.
+      local Ollama model.
 
 ### Phase 8: UI - live statuses, document summaries and previews
 
@@ -156,14 +156,15 @@ rules.
 
 - [ ] Duration check with the configurable `MAX_RECORDING_MINUTES`; a longer recording ends in `FAILED` with a reason
       naming the limit.
-- [ ] `Transcriber` interface with a fake for tests and an adapter for the chosen provider; audio track extracted from
-      video as needed; transcript segments with timestamps stored, then summarized with `Summarizer`.
+- [ ] `Transcriber` interface with a fake for tests and a local whisper.cpp adapter (`whisper-cli` run as a child
+      process, one recording at a time, timeout derived from the duration); audio track extracted with `ffmpeg`;
+      transcript segments with timestamps stored, then summarized with `Summarizer`.
 - [ ] File details return the transcript segments and summary; deletion removes them too.
 - [ ] Signed media URL supports HTTP `Range` requests so the browser player can seek and stream.
-- [ ] e2e tests first with fakes: MP3 and MP4 to `READY` with transcript and summary, over-limit to `FAILED`, provider
+- [ ] e2e tests first with fakes: MP3 and MP4 to `READY` with transcript and summary, over-limit to `FAILED`, transcriber
       failure to `FAILED` then retry to `READY`, `Range` responses; update `apps/api/CLAUDE.md`.
       **Done when:** the e2e suites are green and a real MP3 and MP4 reach `READY` with an English transcript and a
-      summary through the configured provider.
+      summary through the local whisper.cpp and Ollama models.
 
 ### Phase 10: UI - player and transcript
 

@@ -204,3 +204,7 @@ Copy `.env.example` to `apps/api/.env` (`DATABASE_URL`, `JWT_SECRET`, `JWT_EXPIR
 ## Documentation
 
 Update this file when modules, routes or tooling of this app change.
+
+## File upload
+
+Use this research for it: @../../docs/research-meeting-upload.md
