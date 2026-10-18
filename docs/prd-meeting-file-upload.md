@@ -104,12 +104,10 @@ page, so the owner and the people they share the meeting with have the meeting's
   partial uploads.
 - Files up to 2 GB cannot go through a single regular JSON request. The upload must support large bodies, progress and
   resuming after an interruption.
-- Transcription and summarization take time (minutes for long recordings) and depend on external AI services. They
-  must run in the background without blocking the API, and an external failure must end in the Failed status, not a
-  hung Processing.
-- The AI provider(s) for transcription and summarization are **not chosen yet** (open question). Meeting recordings
-  and documents are sent to that provider, so its data retention and training terms must be acceptable for private
-  meeting content.
+- Transcription and summarization run locally on the API server (local speech-to-text and language models); meeting
+  recordings and documents are never sent to an external service. Processing takes time (on CPU, about as long as
+  the recording or longer). It must run in the background without blocking the API, and a failure or hang of the
+  local models must end in the Failed status, not a hung Processing.
 - The maximum recording length that is transcribed is **not decided yet** (open question). A 2 GB video can last
   several hours; longer recordings than the chosen limit must end in Failed with a reason that names the limit.
 - `Meeting` rows are deleted by a database cascade when their owner `User` is deleted. Any future meeting or account
@@ -142,7 +140,7 @@ page, so the owner and the people they share the meeting with have the meeting's
       player, an English transcript with timestamps and a summary.
 - [ ] An uploaded PDF, DOCX, PPTX or TXT reaches Ready and shows a summary. A PDF and a PNG/JPEG can be previewed on
       the page.
-- [ ] When processing fails (for example, the AI service is unavailable), the file shows Failed with a reason, never
+- [ ] When processing fails (for example, the local model is unavailable), the file shows Failed with a reason, never
       stays in Processing indefinitely, and the owner's "Retry" brings it to Ready once the service is back.
 - [ ] Download returns the original file, byte for byte, with its original file name.
 - [ ] After the owner deletes a file, it disappears from the list for the owner and for participants. Its download
