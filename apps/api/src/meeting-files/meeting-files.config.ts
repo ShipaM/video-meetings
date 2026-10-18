@@ -14,3 +14,18 @@ export function resolveFilesDir(): string {
   mkdirSync(dir, { recursive: true });
   return dir;
 }
+
+/** Lifetime of a signed download link. */
+export const FILE_LINK_TTL_SECONDS = 5 * 60;
+
+/** JWT audience of file links, so an access token can never be used as a link and vice versa. */
+export const FILE_LINK_AUDIENCE = 'file-content';
+
+/** Secret for file links (`FILE_LINK_SECRET`), separate from `JWT_SECRET`. */
+export function fileLinkSecret(): string {
+  const secret = process.env.FILE_LINK_SECRET;
+  if (!secret) {
+    throw new Error('FILE_LINK_SECRET is not set');
+  }
+  return secret;
+}
