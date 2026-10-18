@@ -96,3 +96,6 @@ apps/api/src/generated
 
 # Playwright MCP artifacts (screenshots, snapshots, console logs)
 .playwright-mcp
+
+# Meeting file storage of the API (FILES_DIR)
+apps/api/storage
