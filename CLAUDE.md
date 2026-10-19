@@ -47,7 +47,7 @@ Husky (`.husky/pre-commit`, installed by the root `prepare` script on `npm insta
 
 ## MCP
 
-`.mcp.json` in the root registers the project-scoped Playwright MCP server (`npx @playwright/mcp@latest`, started via `cmd /c` on Windows) for browser automation. Claude Code asks to approve it on first use; on macOS/Linux change the command to plain `npx`.
+`.mcp.json` in the root registers the project-scoped Playwright MCP server (`npx @playwright/mcp@0.0.83`, started via `cmd /c` on Windows) for browser automation. Claude Code asks to approve it on first use; on macOS/Linux change the command to plain `npx`. The version is pinned on purpose: with `@latest` npx checks the registry on every start, which takes 15-40 s on Windows and often exceeds the 30 s MCP connection timeout. Bump it deliberately.
 
 ## Keeping documentation up to date
 
