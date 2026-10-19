@@ -3,30 +3,35 @@
 import { Alert, Button, Card, Skeleton, buttonVariants } from '@heroui/react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { clearAccessToken, getEmailFromToken, useAccessToken } from './auth-storage';
 import { API_URL, RECENT_MEETINGS_COUNT, SERVER_UNAVAILABLE_MESSAGE } from './constants';
 import { formatMeetingDate, type Meeting } from './meetings';
 import { SharedChip } from './shared-chip';
-import { useKeyedState } from './use-keyed-state';
 
 type MeetingsState =
   { type: 'loading' } | { type: 'error'; message: string } | { type: 'ready'; meetings: Meeting[] };
 
-const LOADING: MeetingsState = { type: 'loading' };
-
 export default function HomePage() {
   const router = useRouter();
   const token = useAccessToken();
-  // Tied to the token: another user's meetings must never show, not even until the reload ends.
-  const [state, setState] = useKeyedState<MeetingsState>(token ?? '', LOADING);
 
   useEffect(() => {
     if (token === null) router.replace('/login');
   }, [token, router]);
 
+  // Nothing to show until the token is known; also covers the redirect to /login.
+  if (!token) return <main className="flex flex-1" aria-busy="true" />;
+
+  // Next.js keeps a route's state when it is left. The key gives another user a fresh tree, so the
+  // previous user's meetings never show, not even until the new ones have loaded.
+  return <HomeContent key={token} token={token} />;
+}
+
+function HomeContent({ token }: { token: string }) {
+  const [state, setState] = useState<MeetingsState>({ type: 'loading' });
+
   useEffect(() => {
-    if (!token) return;
     const controller = new AbortController();
 
     async function load(accessToken: string) {
@@ -52,10 +57,7 @@ export default function HomePage() {
 
     void load(token);
     return () => controller.abort();
-  }, [token, setState]);
-
-  // Nothing to show until the token is known; also covers the redirect to /login.
-  if (!token) return <main className="flex flex-1" aria-busy="true" />;
+  }, [token]);
 
   const email = getEmailFromToken(token);
   const meetings = state.type === 'ready' ? state.meetings : [];

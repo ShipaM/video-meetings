@@ -3,12 +3,11 @@
 import { Alert, Card, Skeleton, buttonVariants } from '@heroui/react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { clearAccessToken, useAccessToken } from '../../auth-storage';
 import { API_URL, SERVER_UNAVAILABLE_MESSAGE } from '../../constants';
 import { formatMeetingDate, type Meeting, type MeetingFile } from '../../meetings';
 import { SharedChip } from '../../shared-chip';
-import { useKeyedState } from '../../use-keyed-state';
 import { FileList } from './file-list';
 import { ParticipantsSection } from './participants-section';
 import { UploadArea } from './upload-area';
@@ -18,8 +17,6 @@ type PageState =
   | { type: 'not-found' }
   | { type: 'error'; message: string }
   | { type: 'ready'; meeting: Meeting; files: MeetingFile[] };
-
-const LOADING: PageState = { type: 'loading' };
 
 type LoadResult = Exclude<PageState, { type: 'loading' }> | { type: 'unauthorized' };
 
@@ -75,26 +72,30 @@ const backLinkClass = buttonVariants({ variant: 'secondary', className: 'w-full 
 export function MeetingView({ meetingId }: { meetingId: string }) {
   const router = useRouter();
   const token = useAccessToken();
-  // Tied to the user and the meeting: nothing loaded for another user or meeting may show.
-  const [state, setState] = useKeyedState<PageState>(`${token ?? ''}:${meetingId}`, LOADING);
 
   useEffect(() => {
     if (token === null) router.replace('/login');
   }, [token, router]);
 
-  const applyResult = useCallback(
-    (result: LoadResult) => {
-      if (result.type === 'unauthorized') {
-        clearAccessToken(); // expired or invalid token: back to the login page
-        return;
-      }
-      setState(result);
-    },
-    [setState],
-  );
+  if (!token) return <main className="flex flex-1" aria-busy="true" />;
+
+  // Next.js keeps a route's state when it is left. The key gives another user (or meeting) a fresh
+  // tree, so nothing of the previous one shows: not the data, uploads or participants.
+  return <MeetingContent key={`${token}:${meetingId}`} token={token} meetingId={meetingId} />;
+}
+
+function MeetingContent({ token, meetingId }: { token: string; meetingId: string }) {
+  const [state, setState] = useState<PageState>({ type: 'loading' });
+
+  const applyResult = useCallback((result: LoadResult) => {
+    if (result.type === 'unauthorized') {
+      clearAccessToken(); // expired or invalid token: back to the login page
+      return;
+    }
+    setState(result);
+  }, []);
 
   useEffect(() => {
-    if (!token) return;
     const controller = new AbortController();
     fetchMeeting(token, meetingId, controller.signal).then(applyResult, () => {
       // Aborted: the page was left or the token changed.
@@ -110,7 +111,6 @@ export function MeetingView({ meetingId }: { meetingId: string }) {
 
   /** Reloads the file list after an upload; keeps the page if the reload fails. */
   const refresh = useCallback((): Promise<void> => {
-    if (!token) return Promise.resolve();
     const id = ++refreshId.current;
     const run = fetchFiles(token, meetingId).then((result) => {
       if (id !== refreshId.current) return latestRefresh.current;
@@ -124,7 +124,7 @@ export function MeetingView({ meetingId }: { meetingId: string }) {
     });
     latestRefresh.current = run;
     return run;
-  }, [token, meetingId, setState]);
+  }, [token, meetingId]);
 
   /**
    * Drops a deleted file at once, then reloads the list: the reload supersedes any refresh started
@@ -141,10 +141,8 @@ export function MeetingView({ meetingId }: { meetingId: string }) {
       // The delete button left with its row; keep keyboard focus in the file section.
       requestAnimationFrame(() => filesHeading.current?.focus());
     },
-    [refresh, setState],
+    [refresh],
   );
-
-  if (!token) return <main className="flex flex-1" aria-busy="true" />;
 
   // Participants get a read-only page: no upload, delete or participant management.
   const isOwner = state.type === 'ready' && state.meeting.role === 'owner';
