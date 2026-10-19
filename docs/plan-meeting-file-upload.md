@@ -110,7 +110,7 @@ the meeting's file list and download the original. Files live on local disk, out
 - [x] Participants section on the meeting page: list, add by e-mail with the API error shown, remove.
 - [x] Shared meetings appear in the home meetings list with a "Shared" mark.
 - [x] For a participant, hide upload, cancel, delete and participant-management controls.
-- [ ] `ui-ux-pro-max` + Playwright MCP visual check with an owner and a participant account.
+- [x] `ui-ux-pro-max` + Playwright MCP visual check with an owner and a participant account.
       **Done when:** the owner adds a participant, who sees the meeting marked as shared, opens it without any write
       controls and downloads a file; after removal the participant gets "not found".
 
