@@ -1,7 +1,10 @@
 import { authorizedFetch } from '../../api';
 import { SERVER_UNAVAILABLE_MESSAGE } from '../../constants';
 import type { Participant } from '../../meetings';
+import type { RemovalResult } from './use-confirmed-removal';
 import {
+  MEETING_GONE_MESSAGE,
+  MEETING_NOT_FOUND_API_MESSAGE,
   PARTICIPANT_ADD_ERROR_MESSAGES,
   PARTICIPANT_ADD_FAILED_MESSAGE,
   PARTICIPANT_REMOVE_FAILED_MESSAGE,
@@ -70,20 +73,20 @@ export async function addParticipant(
   }
 }
 
-export type RemoveParticipantResult =
-  { type: 'removed' } | { type: 'unauthorized' } | { type: 'error'; message: string };
-
-/** Ends a participant's access; one who is already gone counts as removed. */
-export async function removeParticipant(
-  meetingId: string,
-  userId: string,
-): Promise<RemoveParticipantResult> {
+/** Ends a participant's access; one who is already gone counts as removed, a gone meeting not. */
+export async function removeParticipant(meetingId: string, userId: string): Promise<RemovalResult> {
   try {
     const response = await authorizedFetch(`/meetings/${meetingId}/participants/${userId}`, {
       method: 'DELETE',
     });
     if (!response) return { type: 'unauthorized' };
-    if (response.ok || response.status === 404) return { type: 'removed' };
+    if (response.ok) return { type: 'removed' };
+    if (response.status === 404) {
+      // `404` is either the participant (already gone: removed) or the meeting itself.
+      return (await readErrorMessage(response)) === MEETING_NOT_FOUND_API_MESSAGE
+        ? { type: 'error', message: MEETING_GONE_MESSAGE }
+        : { type: 'removed' };
+    }
     return { type: 'error', message: PARTICIPANT_REMOVE_FAILED_MESSAGE };
   } catch {
     return { type: 'error', message: SERVER_UNAVAILABLE_MESSAGE };

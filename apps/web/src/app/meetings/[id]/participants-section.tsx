@@ -10,12 +10,10 @@ import {
   Label,
   Skeleton,
   TextField,
-  useOverlayState,
 } from '@heroui/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { EMAIL_MAX_LENGTH, EMAIL_PATTERN } from '../../constants';
 import { formatMeetingDate, type Participant } from '../../meetings';
-import { DIALOG_CLOSE_FALLBACK_MS } from './constants';
 import {
   addParticipant,
   listParticipants,
@@ -23,16 +21,17 @@ import {
   type ParticipantsResult,
 } from './participants-api';
 import { UnmountListener } from './unmount-listener';
+import { useConfirmedRemoval } from './use-confirmed-removal';
 
 type ListState =
   | { type: 'loading' }
   | { type: 'error'; message: string }
   | { type: 'ready'; participants: Participant[] };
 
+/** Checks an already trimmed e-mail. */
 function getEmailError(value: string): string | null {
-  if (!value.trim()) return 'Enter the e-mail of a registered user';
-  if (!EMAIL_PATTERN.test(value.trim()))
-    return 'Enter a valid e-mail address, e.g. name@example.com';
+  if (!value) return 'Enter the e-mail of a registered user';
+  if (!EMAIL_PATTERN.test(value)) return 'Enter a valid e-mail address, e.g. name@example.com';
   return null;
 }
 
@@ -78,42 +77,7 @@ function RemoveParticipantButton({
   participant: Participant;
   onRemoved: () => void;
 }) {
-  const dialog = useOverlayState();
-  const [isPending, setIsPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  // As with file deletion, the row goes only once the dialog has closed and returned focus.
-  const isRemoved = useRef(false);
-  const isReported = useRef(false);
-  const fallbackTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-
-  const reportRemoved = useCallback(() => {
-    if (isReported.current) return;
-    isReported.current = true;
-    onRemoved();
-  }, [onRemoved]);
-
-  useEffect(() => () => clearTimeout(fallbackTimer.current), []);
-
-  function handleOpenChange(isOpen: boolean) {
-    if (isPending) return;
-    setError(null);
-    dialog.setOpen(isOpen);
-  }
-
-  async function handleConfirm() {
-    setIsPending(true);
-    setError(null);
-    const result = await removeParticipant(meetingId, participant.userId);
-    setIsPending(false);
-    if (result.type === 'removed') {
-      isRemoved.current = true;
-      dialog.close();
-      fallbackTimer.current = setTimeout(reportRemoved, DIALOG_CLOSE_FALLBACK_MS);
-    } else if (result.type === 'error') {
-      setError(result.message);
-    }
-    // `unauthorized`: the token is cleared, the page goes to the login page.
-  }
+  const removal = useConfirmedRemoval(onRemoved);
 
   return (
     <>
@@ -122,18 +86,18 @@ function RemoveParticipantButton({
         variant="danger-soft"
         className="size-11 shrink-0 sm:size-10"
         aria-label={`Remove ${participant.email}`}
-        onPress={dialog.open}
+        onPress={removal.open}
       >
         <RemoveIcon />
       </Button>
       <AlertDialog.Backdrop
-        isOpen={dialog.isOpen}
-        onOpenChange={handleOpenChange}
+        isOpen={removal.isOpen}
+        onOpenChange={removal.onOpenChange}
         isKeyboardDismissDisabled={false}
       >
         <AlertDialog.Container>
           <AlertDialog.Dialog className="sm:max-w-105">
-            <UnmountListener onUnmount={() => isRemoved.current && reportRemoved()} />
+            <UnmountListener onUnmount={removal.onDialogUnmount} />
             <AlertDialog.Header>
               <AlertDialog.Icon status="danger" />
               <AlertDialog.Heading>Remove this participant?</AlertDialog.Heading>
@@ -146,17 +110,23 @@ function RemoveParticipantButton({
                 will lose access to the meeting and its files at once, download links included. You
                 can add them again later.
               </p>
-              {error !== null && (
+              {removal.error !== null && (
                 <p role="alert" className="text-danger text-sm">
-                  {error}
+                  {removal.error}
                 </p>
               )}
             </AlertDialog.Body>
             <AlertDialog.Footer>
-              <Button slot="close" variant="tertiary" isDisabled={isPending}>
+              <Button slot="close" variant="tertiary" isDisabled={removal.isPending}>
                 Keep participant
               </Button>
-              <Button variant="danger" isPending={isPending} onPress={handleConfirm}>
+              <Button
+                variant="danger"
+                isPending={removal.isPending}
+                onPress={() =>
+                  removal.confirm(() => removeParticipant(meetingId, participant.userId))
+                }
+              >
                 Remove
               </Button>
             </AlertDialog.Footer>
@@ -186,16 +156,32 @@ export function ParticipantsSection({ meetingId }: { meetingId: string }) {
     // `unauthorized`: the token is cleared, the page goes to the login page.
   }, []);
 
-  useEffect(() => {
+  // One list request at a time: a retry replaces the previous one, leaving the page aborts it.
+  const loadController = useRef<AbortController | null>(null);
+
+  const load = useCallback(() => {
+    loadController.current?.abort();
     const controller = new AbortController();
+    loadController.current = controller;
     listParticipants(meetingId, controller.signal).then(applyResult, () => {
-      // Aborted: the page was left.
+      // Aborted: replaced by a retry, or the page was left.
     });
-    return () => controller.abort();
   }, [meetingId, applyResult]);
+
+  useEffect(() => {
+    load();
+    return () => loadController.current?.abort();
+  }, [load]);
+
+  function handleRetry() {
+    setState({ type: 'loading' });
+    load();
+  }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    // Adding needs the loaded list, so the new participant can simply be appended to it.
+    if (state.type !== 'ready') return;
     const value = email.trim();
     const invalid = getEmailError(value);
     if (invalid) {
@@ -211,20 +197,13 @@ export function ParticipantsSection({ meetingId }: { meetingId: string }) {
     setIsPending(false);
     if (result.type === 'added') {
       const added = result.participant;
-      if (state.type === 'ready') {
-        // Updater, not the `state` captured before the await: a removal meanwhile must stay, and a
-        // list that loaded meanwhile may already hold the new participant.
-        setState((current) =>
-          current.type === 'ready' &&
-          !current.participants.some((item) => item.userId === added.userId)
-            ? { ...current, participants: [...current.participants, added] }
-            : current,
-        );
-      } else {
-        // The list never loaded: load it now, so the new participant shows up.
-        setState({ type: 'loading' });
-        void listParticipants(meetingId).then(applyResult);
-      }
+      // Updater, not the `state` captured before the await: a removal meanwhile must stay.
+      setState((current) =>
+        current.type === 'ready' &&
+        !current.participants.some((item) => item.userId === added.userId)
+          ? { ...current, participants: [...current.participants, added] }
+          : current,
+      );
       setEmail('');
       setAnnouncement(`${added.email} can now open this meeting.`);
     } else if (result.type === 'error') {
@@ -290,6 +269,7 @@ export function ParticipantsSection({ meetingId }: { meetingId: string }) {
               variant="secondary"
               className="min-h-11 shrink-0 sm:min-h-10"
               isPending={isPending}
+              isDisabled={state.type !== 'ready'}
             >
               {isPending ? 'Adding…' : 'Add'}
             </Button>
@@ -310,11 +290,19 @@ export function ParticipantsSection({ meetingId }: { meetingId: string }) {
       )}
 
       {state.type === 'error' && (
-        <Alert status="danger">
+        <Alert status="danger" className="items-center">
           <Alert.Indicator />
           <Alert.Content>
             <Alert.Description>{state.message}</Alert.Description>
           </Alert.Content>
+          <Button
+            size="sm"
+            variant="secondary"
+            className="min-h-11 sm:min-h-9"
+            onPress={handleRetry}
+          >
+            Retry
+          </Button>
         </Alert>
       )}
 
