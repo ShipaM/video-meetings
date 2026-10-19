@@ -75,6 +75,20 @@ describe('AddParticipantHandler', () => {
     ).rejects.toThrow(ConflictException);
   });
 
+  it('answers 404 when the meeting or the user was deleted meanwhile', async () => {
+    execute.mockResolvedValueOnce(meeting).mockResolvedValueOnce(user);
+    create.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Foreign key constraint violated', {
+        code: 'P2003',
+        clientVersion: 'test',
+      }),
+    );
+
+    await expect(
+      handler.execute(new AddParticipantCommand('owner', 'm1', 'b@example.com')),
+    ).rejects.toThrow(NotFoundException);
+  });
+
   it('passes other database errors through', async () => {
     execute.mockResolvedValueOnce(meeting).mockResolvedValueOnce(user);
     create.mockRejectedValue(new Error('database down'));

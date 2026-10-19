@@ -32,9 +32,15 @@ export class AddParticipantHandler implements ICommandHandler<AddParticipantComm
       });
       return { userId: user.id, email: user.email, addedAt };
     } catch (error) {
-      // The (meetingId, userId) primary key also settles two concurrent adds.
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        throw new ConflictException('This user is already a participant');
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        // The (meetingId, userId) primary key also settles two concurrent adds.
+        if (error.code === 'P2002') {
+          throw new ConflictException('This user is already a participant');
+        }
+        // A foreign key: the meeting or the user was deleted since they were read.
+        if (error.code === 'P2003') {
+          throw new NotFoundException('Meeting or user not found');
+        }
       }
       throw error;
     }
