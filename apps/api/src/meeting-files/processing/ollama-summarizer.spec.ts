@@ -96,6 +96,26 @@ describe('OllamaSummarizer', () => {
     );
   });
 
+  it('rejects with SummaryError for a 200 answer whose body is not JSON (a proxy page)', async () => {
+    fetchMock.mockResolvedValue(new Response('<html>Bad gateway</html>', { status: 200 }));
+
+    await expect(new OllamaSummarizer(settings).summarize('notes', signal)).rejects.toThrow(
+      SummaryError,
+    );
+  });
+
+  it('gives up when the part summaries do not get shorter', async () => {
+    const paragraph = 'word '.repeat(30).trim();
+    const text = [paragraph, paragraph, paragraph].join('\n\n');
+    // Each part "summary" is as long as the part: combining would never converge.
+    fetchMock.mockImplementation(() => Promise.resolve(summary('x'.repeat(paragraph.length + 5))));
+
+    await expect(new OllamaSummarizer(settings).summarize(text, signal)).rejects.toThrow(
+      SummaryError,
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
   it('rejects with SummaryError when Ollama is unreachable', async () => {
     fetchMock.mockRejectedValue(new TypeError('fetch failed'));
 

@@ -25,6 +25,9 @@ const COMBINE_PROMPT =
   'owners, as short "- " bullet points, at most 10, without repeating anything. Answer as JSON: ' +
   '{"summary": "..."}.';
 
+/** Rounds of combining part summaries before giving up (each round must shorten the text). */
+const MAX_COMBINE_ROUNDS = 3;
+
 /**
  * Characters of input per request: about 3 characters per token, with a third of the context left
  * for the instructions and the answer.
@@ -64,20 +67,29 @@ export class OllamaSummarizer extends Summarizer {
     this.maxChars = chunkCharsFor(settings.numCtx);
   }
 
-  async summarize(text: string, signal: AbortSignal): Promise<string> {
+  summarize(text: string, signal: AbortSignal): Promise<string> {
+    return this.summarizeRound(text, signal, 0);
+  }
+
+  private async summarizeRound(text: string, signal: AbortSignal, round: number): Promise<string> {
     const parts = splitText(text, this.maxChars);
     if (parts.length === 1) {
-      return this.ask(SUMMARY_PROMPT, parts[0], signal);
+      return this.ask(round === 0 ? SUMMARY_PROMPT : COMBINE_PROMPT, parts[0], signal);
     }
     const summaries: string[] = [];
     for (const part of parts) {
       summaries.push(await this.ask(PART_PROMPT, part, signal));
     }
     const combined = summaries.join('\n\n');
-    // Still too long for one request: summarize the part summaries the same way.
-    return combined.length > this.maxChars
-      ? this.summarize(combined, signal)
-      : this.ask(COMBINE_PROMPT, combined, signal);
+    if (combined.length <= this.maxChars) {
+      return this.ask(COMBINE_PROMPT, combined, signal);
+    }
+    // Still too long for one request: summarize the part summaries the same way, as long as that
+    // converges.
+    if (round + 1 >= MAX_COMBINE_ROUNDS || combined.length >= text.length) {
+      throw this.failure('The part summaries do not get shorter; giving up');
+    }
+    return this.summarizeRound(combined, signal, round + 1);
   }
 
   private async ask(instructions: string, text: string, signal: AbortSignal): Promise<string> {
@@ -111,11 +123,14 @@ export class OllamaSummarizer extends Summarizer {
       throw this.failure(`Ollama answered ${response.status}: ${detail.slice(0, 200)}`);
     }
 
-    const body = (await response.json()) as { message?: { content?: string } };
     let summary: unknown;
     try {
+      const body = (await response.json()) as { message?: { content?: string } };
       summary = (JSON.parse(body.message?.content ?? '') as { summary?: unknown }).summary;
-    } catch {
+    } catch (error) {
+      if (signal.aborted) {
+        throw error;
+      }
       throw this.failure('Ollama returned an answer that is not the requested JSON');
     }
     if (typeof summary !== 'string' || !summary.trim()) {
