@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
+import { BeforeApplicationShutdown, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PgBoss } from 'pg-boss';
 import { JOBS_STOP_TIMEOUT_MS, jobsSchema } from './jobs.config.js';
 
@@ -8,7 +8,7 @@ import { JOBS_STOP_TIMEOUT_MS, jobsSchema } from './jobs.config.js';
  * `onApplicationBootstrap`, so workers and producers can use it from there on.
  */
 @Injectable()
-export class JobsService implements OnModuleInit, OnApplicationShutdown {
+export class JobsService implements OnModuleInit, BeforeApplicationShutdown {
   private readonly logger = new Logger(JobsService.name);
 
   readonly boss = new PgBoss({
@@ -22,8 +22,11 @@ export class JobsService implements OnModuleInit, OnApplicationShutdown {
     await this.boss.start();
   }
 
-  async onApplicationShutdown(): Promise<void> {
-    // Running jobs get a moment to finish; an interrupted one is retried after the restart.
+  /**
+   * Before `onApplicationShutdown`, where Prisma disconnects: running jobs get a moment to finish
+   * and still write their results. An interrupted one is retried after the restart.
+   */
+  async beforeApplicationShutdown(): Promise<void> {
     await this.boss.stop({ graceful: true, timeout: JOBS_STOP_TIMEOUT_MS });
   }
 }
