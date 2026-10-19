@@ -1,3 +1,5 @@
+import { numberEnv } from '../config/env.js';
+
 /** pg-boss settings, read from the environment (see `.env.example`). */
 
 /** PostgreSQL schema of the pg-boss tables; Prisma only manages `public`. */
@@ -7,12 +9,7 @@ export function jobsSchema(): string {
 
 /** How often a worker looks for new jobs, in seconds (pg-boss accepts 0.5 and up). */
 export function jobsPollingIntervalSeconds(): number {
-  const raw = process.env.JOBS_POLLING_INTERVAL_SECONDS;
-  const value = raw ? Number(raw) : 2;
-  if (!Number.isFinite(value) || value < 0.5) {
-    throw new Error(`JOBS_POLLING_INTERVAL_SECONDS must be 0.5 or more, got "${raw}"`);
-  }
-  return value;
+  return numberEnv('JOBS_POLLING_INTERVAL_SECONDS', 2, 0.5);
 }
 
 /** Longest wait for running jobs when the app stops; then their signals are aborted. */

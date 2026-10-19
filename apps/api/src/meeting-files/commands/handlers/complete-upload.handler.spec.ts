@@ -11,20 +11,23 @@ import { CompleteUploadHandler } from './complete-upload.handler.js';
 describe('CompleteUploadHandler', () => {
   const findUnique = vi.fn();
   const updateMany = vi.fn();
+  const updateManyAndReturn = vi.fn();
   const deleteMany = vi.fn();
   const removeQuietly = vi.fn();
-  const start = vi.fn();
+  const queue = vi.fn();
   let dir: string;
 
+  const tx = { meetingFile: { updateManyAndReturn } };
   const handler = new CompleteUploadHandler(
     {
       meetingFile: { findUnique, updateMany, deleteMany },
+      $transaction: (run: (client: typeof tx) => Promise<unknown>) => run(tx),
     } as unknown as PrismaService,
     {
       pathOf: (key: string) => path.join(dir, key),
       removeQuietly,
     } as unknown as FilesStorageService,
-    { start } as unknown as ProcessingQueue,
+    { queue } as unknown as ProcessingQueue,
   );
 
   const uploading = {
@@ -52,16 +55,12 @@ describe('CompleteUploadHandler', () => {
   });
 
   beforeEach(() => {
-    findUnique.mockReset();
-    updateMany.mockReset();
-    deleteMany.mockReset();
-    removeQuietly.mockReset();
-    start.mockReset();
+    vi.resetAllMocks();
   });
 
-  it('sends a document with matching content to PROCESSING and queues its job', async () => {
+  it('sends a document to PROCESSING and queues its job in the same transaction', async () => {
     await writeFile(path.join(dir, 'f1'), notes);
-    updateMany.mockResolvedValue({ count: 1 });
+    updateManyAndReturn.mockResolvedValue([{ ...uploading, processingAttempt: 1 }]);
     findUnique
       .mockResolvedValueOnce(uploading)
       .mockResolvedValueOnce({ ...uploading, status: 'PROCESSING', processingAttempt: 1 });
@@ -70,7 +69,7 @@ describe('CompleteUploadHandler', () => {
       status: 'PROCESSING',
     });
 
-    expect(updateMany).toHaveBeenCalledWith({
+    expect(updateManyAndReturn).toHaveBeenCalledWith({
       where: { id: 'f1', status: 'UPLOADING' },
       data: {
         status: 'PROCESSING',
@@ -78,8 +77,18 @@ describe('CompleteUploadHandler', () => {
         processingAttempt: { increment: 1 },
       },
     });
-    expect(start).toHaveBeenCalledWith('f1', 1);
+    expect(queue).toHaveBeenCalledWith(tx, 'f1', 1);
+    expect(updateMany).not.toHaveBeenCalled();
     expect(removeQuietly).not.toHaveBeenCalled();
+  });
+
+  it('fails as a whole when the job cannot be queued (the file stays UPLOADING)', async () => {
+    await writeFile(path.join(dir, 'f1'), notes);
+    updateManyAndReturn.mockResolvedValue([{ ...uploading, processingAttempt: 1 }]);
+    queue.mockRejectedValue(new Error('pg-boss down'));
+    findUnique.mockResolvedValueOnce(uploading);
+
+    await expect(handler.execute(new CompleteUploadCommand('f1'))).rejects.toThrow('pg-boss down');
   });
 
   it('makes an image READY at once, without a job', async () => {
@@ -93,19 +102,20 @@ describe('CompleteUploadHandler', () => {
       where: { id: 'f1', status: 'UPLOADING' },
       data: { status: 'READY', completedAt: expect.any(Date) as Date },
     });
-    expect(start).not.toHaveBeenCalled();
+    expect(updateManyAndReturn).not.toHaveBeenCalled();
+    expect(queue).not.toHaveBeenCalled();
   });
 
   it('queues no second job when a concurrent completion made the change', async () => {
     await writeFile(path.join(dir, 'f1'), notes);
-    updateMany.mockResolvedValue({ count: 0 });
+    updateManyAndReturn.mockResolvedValue([]);
     findUnique
       .mockResolvedValueOnce(uploading)
       .mockResolvedValueOnce({ ...uploading, status: 'PROCESSING', processingAttempt: 1 });
 
     await handler.execute(new CompleteUploadCommand('f1'));
 
-    expect(start).not.toHaveBeenCalled();
+    expect(queue).not.toHaveBeenCalled();
   });
 
   it('deletes the row and the data when the content does not match the type', async () => {
@@ -117,7 +127,7 @@ describe('CompleteUploadHandler', () => {
     );
     expect(deleteMany).toHaveBeenCalledWith({ where: { id: 'f1', status: 'UPLOADING' } });
     expect(removeQuietly).toHaveBeenCalledWith('f1', 'mismatched upload f1');
-    expect(updateMany).not.toHaveBeenCalled();
+    expect(updateManyAndReturn).not.toHaveBeenCalled();
   });
 
   it('treats a missing data file as a mismatch instead of failing', async () => {
@@ -135,13 +145,14 @@ describe('CompleteUploadHandler', () => {
     await handler.execute(new CompleteUploadCommand('f1'));
 
     expect(updateMany).not.toHaveBeenCalled();
+    expect(updateManyAndReturn).not.toHaveBeenCalled();
     expect(deleteMany).not.toHaveBeenCalled();
-    expect(start).not.toHaveBeenCalled();
+    expect(queue).not.toHaveBeenCalled();
   });
 
   it('answers 404 when the upload was cancelled while it was being completed', async () => {
     await writeFile(path.join(dir, 'f1'), notes);
-    updateMany.mockResolvedValue({ count: 0 });
+    updateManyAndReturn.mockResolvedValue([]);
     findUnique.mockResolvedValueOnce(uploading).mockResolvedValueOnce(null);
 
     await expect(handler.execute(new CompleteUploadCommand('f1'))).rejects.toThrow(

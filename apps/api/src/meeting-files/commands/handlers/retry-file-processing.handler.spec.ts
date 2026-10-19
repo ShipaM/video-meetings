@@ -8,15 +8,18 @@ import { RetryFileProcessingHandler } from './retry-file-processing.handler.js';
 
 describe('RetryFileProcessingHandler', () => {
   const findFirst = vi.fn();
-  const findUnique = vi.fn();
-  const updateMany = vi.fn();
+  const updateManyAndReturn = vi.fn();
   const execute = vi.fn();
-  const start = vi.fn();
+  const queue = vi.fn();
 
+  const tx = { meetingFile: { updateManyAndReturn } };
   const handler = new RetryFileProcessingHandler(
-    { meetingFile: { findFirst, findUnique, updateMany } } as unknown as PrismaService,
+    {
+      meetingFile: { findFirst },
+      $transaction: (run: (client: typeof tx) => Promise<unknown>) => run(tx),
+    } as unknown as PrismaService,
     { execute } as unknown as QueryBus,
-    { start } as unknown as ProcessingQueue,
+    { queue } as unknown as ProcessingQueue,
   );
 
   const retried = {
@@ -32,49 +35,49 @@ describe('RetryFileProcessingHandler', () => {
     processingAttempt: 3,
     createdAt: new Date(),
     completedAt: new Date(),
-    summary: null,
   };
   const run = () => handler.execute(new RetryFileProcessingCommand('u1', 'm1', 'f1'));
 
   beforeEach(() => {
     vi.resetAllMocks();
     execute.mockResolvedValue({ id: 'm1', role: 'owner' });
-    findFirst.mockResolvedValue({ kind: 'DOCUMENT' });
-    updateMany.mockResolvedValue({ count: 1 });
-    findUnique.mockResolvedValue(retried);
+    updateManyAndReturn.mockResolvedValue([retried]);
   });
 
-  it('starts a new attempt for a FAILED document and queues it', async () => {
+  it('starts a new attempt of a FAILED document and queues it in the same transaction', async () => {
     await expect(run()).resolves.toMatchObject({ id: 'f1', status: 'PROCESSING', summary: null });
 
     expect(execute).toHaveBeenCalledWith(new GetMeetingQuery('u1', 'm1', 'manage'));
-    expect(updateMany).toHaveBeenCalledWith({
-      where: { id: 'f1', meetingId: 'm1', status: 'FAILED' },
+    expect(updateManyAndReturn).toHaveBeenCalledWith({
+      where: { id: 'f1', meetingId: 'm1', status: 'FAILED', kind: 'DOCUMENT' },
       data: { status: 'PROCESSING', failureReason: null, processingAttempt: { increment: 1 } },
     });
-    expect(start).toHaveBeenCalledWith('f1', 3);
+    expect(queue).toHaveBeenCalledWith(tx, 'f1', 3);
+    expect(findFirst).not.toHaveBeenCalled();
   });
 
-  it('answers 409 for a file that is not FAILED (or a concurrent retry won)', async () => {
-    updateMany.mockResolvedValue({ count: 0 });
+  it('fails as a whole when the job cannot be queued (the file stays FAILED)', async () => {
+    queue.mockRejectedValue(new Error('pg-boss down'));
 
-    await expect(run()).rejects.toThrow(ConflictException);
-    expect(start).not.toHaveBeenCalled();
+    await expect(run()).rejects.toThrow('pg-boss down');
   });
 
-  it('answers 409 for a kind that is not processed yet', async () => {
-    findFirst.mockResolvedValue({ kind: 'IMAGE' });
+  it('answers 409 for a file that cannot be retried (not FAILED, not a document)', async () => {
+    updateManyAndReturn.mockResolvedValue([]);
+    findFirst.mockResolvedValue({ id: 'f1' });
 
     await expect(run()).rejects.toThrow(ConflictException);
-    expect(updateMany).not.toHaveBeenCalled();
+    expect(queue).not.toHaveBeenCalled();
   });
 
   it('answers 404 for a missing file and passes on 403 for a participant', async () => {
+    updateManyAndReturn.mockResolvedValue([]);
     findFirst.mockResolvedValue(null);
     await expect(run()).rejects.toThrow(NotFoundException);
 
     execute.mockRejectedValue(new ForbiddenException());
+    updateManyAndReturn.mockClear();
     await expect(run()).rejects.toThrow(ForbiddenException);
-    expect(updateMany).not.toHaveBeenCalled();
+    expect(updateManyAndReturn).not.toHaveBeenCalled();
   });
 });

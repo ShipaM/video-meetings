@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { PrismaService } from '../../../prisma/prisma.service.js';
+import { ProcessingQueue } from '../../processing/processing-queue.js';
 import { FAILURE_REASONS } from '../../processing/processing.config.js';
 import { FailStuckProcessingCommand } from '../fail-stuck-processing.command.js';
 
@@ -8,18 +9,33 @@ import { FailStuckProcessingCommand } from '../fail-stuck-processing.command.js'
 export class FailStuckProcessingHandler implements ICommandHandler<FailStuckProcessingCommand> {
   private readonly logger = new Logger(FailStuckProcessingHandler.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly processing: ProcessingQueue,
+  ) {}
 
   async execute({ cutoff }: FailStuckProcessingCommand): Promise<number> {
-    // A job that is still alive changes the row only when it ends, so `updatedAt` is the start of
-    // the attempt; the cutoff leaves room for every retry pg-boss may still make.
-    const { count } = await this.prisma.meetingFile.updateMany({
+    const candidates = await this.prisma.meetingFile.findMany({
       where: { status: 'PROCESSING', updatedAt: { lt: cutoff } },
-      data: { status: 'FAILED', failureReason: FAILURE_REASONS.interrupted },
+      select: { id: true, processingAttempt: true },
     });
-    if (count > 0) {
-      this.logger.warn(`Failed ${count} file(s) stuck in PROCESSING`);
+
+    let failed = 0;
+    for (const { id, processingAttempt } of candidates) {
+      // Queued, running or waiting for a retry: not stuck, however long the queue is.
+      if (await this.processing.hasLiveJob(id, processingAttempt)) {
+        continue;
+      }
+      // Conditional on the attempt: a retry started meanwhile is not touched.
+      const { count } = await this.prisma.meetingFile.updateMany({
+        where: { id, status: 'PROCESSING', processingAttempt },
+        data: { status: 'FAILED', failureReason: FAILURE_REASONS.interrupted },
+      });
+      failed += count;
     }
-    return count;
+    if (failed > 0) {
+      this.logger.warn(`Failed ${failed} file(s) left PROCESSING without a job`);
+    }
+    return failed;
   }
 }

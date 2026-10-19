@@ -37,21 +37,32 @@ export class CompleteUploadHandler implements ICommandHandler<CompleteUploadComm
 
     // Documents are summarized in the background; images (and, until Phase 9, recordings) are
     // ready at once.
-    const process = file.kind === 'DOCUMENT';
-    const { count } = await this.prisma.meetingFile.updateMany({
-      where: { id: fileId, status: 'UPLOADING' },
-      data: process
-        ? { status: 'PROCESSING', completedAt: new Date(), processingAttempt: { increment: 1 } }
-        : { status: 'READY', completedAt: new Date() },
-    });
+    if (file.kind === 'DOCUMENT') {
+      // Status and job commit together; only the call that made the change queues the job
+      // (completion may run twice).
+      await this.prisma.$transaction(async (tx) => {
+        const [processing] = await tx.meetingFile.updateManyAndReturn({
+          where: { id: fileId, status: 'UPLOADING' },
+          data: {
+            status: 'PROCESSING',
+            completedAt: new Date(),
+            processingAttempt: { increment: 1 },
+          },
+        });
+        if (processing) {
+          await this.processing.queue(tx, fileId, processing.processingAttempt);
+        }
+      });
+    } else {
+      await this.prisma.meetingFile.updateMany({
+        where: { id: fileId, status: 'UPLOADING' },
+        data: { status: 'READY', completedAt: new Date() },
+      });
+    }
     // Cancelled or cleaned up meanwhile: the upload is gone, not a server error.
     const completed = await this.prisma.meetingFile.findUnique({ where: { id: fileId } });
     if (!completed) {
       throw new NotFoundException('Upload not found');
-    }
-    // Only the call that made the change queues the job (completion may run twice).
-    if (process && count > 0) {
-      await this.processing.start(fileId, completed.processingAttempt);
     }
     return completed;
   }

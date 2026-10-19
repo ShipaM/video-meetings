@@ -1,3 +1,5 @@
+import { numberEnv } from '../../config/env.js';
+
 /** Background processing settings, read from the environment (see `.env.example`). */
 
 /** `local`: summaries by the local Ollama model; `fake`: a deterministic stand-in (tests, dev). */
@@ -11,33 +13,19 @@ export function aiProvider(): AiProvider {
   return value;
 }
 
-function positiveNumber(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (raw === undefined || raw === '') {
-    return fallback;
-  }
-  const value = Number(raw);
-  if (!Number.isFinite(value) || value <= 0) {
-    throw new Error(`${name} must be a positive number, got "${raw}"`);
-  }
-  return value;
-}
-
 /**
  * Longest a document job may take, extraction and summary together; then it ends in `FAILED`.
  * CPU inference of a long summary can take minutes, hence the generous default.
  */
 export function documentJobTimeoutMs(): number {
-  return positiveNumber('DOCUMENT_PROCESSING_TIMEOUT_SECONDS', 15 * 60) * 1000;
+  return numberEnv('DOCUMENT_PROCESSING_TIMEOUT_SECONDS', 15 * 60) * 1000;
 }
 
 /**
- * A file `PROCESSING` without any change for this long has lost its job: every attempt pg-boss
- * makes (the first and two retries) has timed out, with room for the retry delays.
+ * The watchdog looks only at files `PROCESSING` without a change for this long; whether they are
+ * stuck is decided by their job (see `FailStuckProcessingCommand`), not by the time.
  */
-export function stuckProcessingMs(): number {
-  return 3 * documentJobTimeoutMs() + 60 * 60 * 1000;
-}
+export const STUCK_PROCESSING_GRACE_MS = 15 * 60 * 1000;
 
 export interface OllamaSettings {
   url: string;
@@ -54,7 +42,7 @@ export function ollamaSettings(): OllamaSettings {
   return {
     url: (process.env.OLLAMA_URL || 'http://localhost:11434').replace(/\/+$/, ''),
     model,
-    numCtx: positiveNumber('OLLAMA_NUM_CTX', 16384),
+    numCtx: numberEnv('OLLAMA_NUM_CTX', 16384, 1),
   };
 }
 
@@ -65,7 +53,6 @@ export const MAX_EXTRACTED_CHARS = 2_000_000;
 export const FAILURE_REASONS = {
   summary: 'Summary could not be generated',
   timeout: 'Processing took too long',
-  notStarted: 'Processing could not be started',
   interrupted: 'Processing was interrupted',
   unexpected: 'Processing failed',
 } as const;

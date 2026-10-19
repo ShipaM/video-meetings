@@ -22,34 +22,30 @@ export class RetryFileProcessingHandler implements ICommandHandler<RetryFileProc
     // Only the owner retries: 404 for a missing or foreign meeting, 403 for a participant.
     await this.queryBus.execute(new GetMeetingQuery(userId, meetingId, 'manage'));
 
-    const file = await this.prisma.meetingFile.findFirst({
-      where: { id: fileId, meetingId, status: { not: 'UPLOADING' } },
-      select: { kind: true },
+    // A new attempt and its job commit together. The update is conditional, so two retries at
+    // once start one attempt; only documents are processed so far (recordings: Phase 9).
+    const retried = await this.prisma.$transaction(async (tx) => {
+      const [processing] = await tx.meetingFile.updateManyAndReturn({
+        where: { id: fileId, meetingId, status: 'FAILED', kind: 'DOCUMENT' },
+        data: { status: 'PROCESSING', failureReason: null, processingAttempt: { increment: 1 } },
+      });
+      if (processing) {
+        await this.processing.queue(tx, fileId, processing.processingAttempt);
+      }
+      return processing;
     });
-    if (!file) {
-      throw new NotFoundException('File not found');
-    }
-    // Only documents are processed so far (recordings: Phase 9).
-    if (file.kind !== 'DOCUMENT') {
-      throw new ConflictException('Only failed documents can be retried');
-    }
 
-    // Conditional, so two retries at once start one new attempt.
-    const { count } = await this.prisma.meetingFile.updateMany({
-      where: { id: fileId, meetingId, status: 'FAILED' },
-      data: { status: 'PROCESSING', failureReason: null, processingAttempt: { increment: 1 } },
-    });
-    if (count === 0) {
-      throw new ConflictException('Only failed documents can be retried');
-    }
-    const retried = await this.prisma.meetingFile.findUnique({
-      where: { id: fileId },
-      include: { summary: true },
-    });
     if (!retried) {
-      throw new NotFoundException('File not found'); // deleted meanwhile
+      // Nothing changed: tell a missing file from one that cannot be retried.
+      const file = await this.prisma.meetingFile.findFirst({
+        where: { id: fileId, meetingId, status: { not: 'UPLOADING' } },
+        select: { id: true },
+      });
+      throw file
+        ? new ConflictException('Only failed documents can be retried')
+        : new NotFoundException('File not found');
     }
-    await this.processing.start(fileId, retried.processingAttempt);
-    return toMeetingFileDetails(retried);
+    // A FAILED file has no summary: the summary is only stored together with READY.
+    return toMeetingFileDetails({ ...retried, summary: null });
   }
 }
