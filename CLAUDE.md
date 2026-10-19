@@ -31,6 +31,8 @@ npm run db:up | db:down     # start / stop PostgreSQL via Docker Compose
 
 `docker-compose.yml` in the root runs PostgreSQL 17 (`postgres:17-alpine`) on port 5432 with a persistent `postgres_data` volume and a healthcheck. Defaults (user/password `postgres`, database `video_meetings`) can be overridden through a root `.env` file; see `.env.example`. The API uses Prisma (`apps/api/prisma`) with its own `apps/api/.env` (see `apps/api/.env.example`).
 
+The same file has an `ollama` service (`ollama/ollama`, port 11434, models in the `ollama_models` volume): the local LLM for document summaries. Start it with `docker compose up -d ollama` and pull the model once (`docker compose exec ollama ollama pull qwen3:4b`); the API uses it with `AI_PROVIDER=local` (see `apps/api/CLAUDE.md`).
+
 Target one workspace with `npm run <script> --workspace=web|api`.
 
 ## Conventions

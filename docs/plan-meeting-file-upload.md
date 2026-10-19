@@ -121,14 +121,14 @@ retried; images are `READY` right away.
 **Affects:** backend / database
 **Tasks**
 
-- [ ] Background processing that does not block requests: a completed document becomes `PROCESSING`, an image `READY`;
+- [x] Background processing that does not block requests: a completed document becomes `PROCESSING`, an image `READY`;
       every job has a timeout so an error or hang of the local model ends in `FAILED` with a short reason.
-- [ ] Text extraction for PDF, DOCX, PPTX and TXT; `Summarizer` interface with a fake for tests and a local Ollama
+- [x] Text extraction for PDF, DOCX, PPTX and TXT; `Summarizer` interface with a fake for tests and a local Ollama
       adapter (URL, model and context size configured through env); summary stored in a migration-backed table.
-- [ ] File details route returns status, failure reason and summary; `POST /meetings/:id/files/:fileId/retry` (owner
+- [x] File details route returns status, failure reason and summary; `POST /meetings/:id/files/:fileId/retry` (owner
       only, `FAILED` files only).
-- [ ] Deleting a file in `PROCESSING` removes it and its results, and the finishing job does not recreate them.
-- [ ] e2e tests first with the fake summarizer: success to `READY` with a summary, failure to `FAILED` with a reason,
+- [x] Deleting a file in `PROCESSING` removes it and its results, and the finishing job does not recreate them.
+- [x] e2e tests first with the fake summarizer: success to `READY` with a summary, failure to `FAILED` with a reason,
       retry to `READY`, delete during processing, participant `403` on retry; update `apps/api/CLAUDE.md`.
       **Done when:** the e2e suites are green and a real PDF, DOCX, PPTX and TXT reach `READY` with a summary through the
       local Ollama model.
