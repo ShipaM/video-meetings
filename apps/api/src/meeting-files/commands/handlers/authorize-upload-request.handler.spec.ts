@@ -1,5 +1,6 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
-import type { CommandBus } from '@nestjs/cqrs';
+import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import type { CommandBus, QueryBus } from '@nestjs/cqrs';
+import { GetMeetingQuery } from '../../../meetings/index.js';
 import type { PrismaService } from '../../../prisma/prisma.service.js';
 import type { FilesStorageService } from '../../files-storage.service.js';
 import { AuthorizeUploadRequestCommand } from '../authorize-upload-request.command.js';
@@ -8,12 +9,15 @@ import { AuthorizeUploadRequestHandler } from './authorize-upload-request.handle
 
 describe('AuthorizeUploadRequestHandler', () => {
   const findFirst = vi.fn();
+  const findUnique = vi.fn();
   const updateMany = vi.fn();
   const execute = vi.fn();
+  const query = vi.fn();
   const getUpload = vi.fn();
   const handler = new AuthorizeUploadRequestHandler(
-    { meetingFile: { findFirst, updateMany } } as unknown as PrismaService,
+    { meetingFile: { findFirst, findUnique, updateMany } } as unknown as PrismaService,
     { execute } as unknown as CommandBus,
+    { execute: query } as unknown as QueryBus,
     { store: { getUpload } } as unknown as FilesStorageService,
   );
 
@@ -21,18 +25,44 @@ describe('AuthorizeUploadRequestHandler', () => {
 
   beforeEach(() => {
     findFirst.mockReset();
+    findUnique.mockReset();
     updateMany.mockReset();
     execute.mockReset();
+    query.mockReset();
     getUpload.mockReset();
   });
 
-  it("hides another user's upload (404)", async () => {
+  it("hides another user's upload from a stranger (404)", async () => {
     findFirst.mockResolvedValue(null);
+    findUnique.mockResolvedValue({ meetingId: 'm1' });
+    query.mockRejectedValue(new NotFoundException());
 
     await expect(
       handler.execute(new AuthorizeUploadRequestCommand('u2', 'f1', 'HEAD')),
     ).rejects.toThrow(NotFoundException);
     expect(findFirst).toHaveBeenCalledWith({ where: { id: 'f1', uploadedById: 'u2' } });
+    expect(query).toHaveBeenCalledWith(new GetMeetingQuery('u2', 'm1', 'manage'));
+  });
+
+  it("forbids a participant to touch the owner's upload (403)", async () => {
+    findFirst.mockResolvedValue(null);
+    findUnique.mockResolvedValue({ meetingId: 'm1' });
+    query.mockRejectedValue(new ForbiddenException());
+
+    await expect(
+      handler.execute(new AuthorizeUploadRequestCommand('u3', 'f1', 'PATCH')),
+    ).rejects.toThrow(ForbiddenException);
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it('answers 404 for a missing upload without checking any meeting', async () => {
+    findFirst.mockResolvedValue(null);
+    findUnique.mockResolvedValue(null);
+
+    await expect(
+      handler.execute(new AuthorizeUploadRequestCommand('u1', 'missing', 'HEAD')),
+    ).rejects.toThrow(NotFoundException);
+    expect(query).not.toHaveBeenCalled();
   });
 
   it('records chunk activity on PATCH', async () => {

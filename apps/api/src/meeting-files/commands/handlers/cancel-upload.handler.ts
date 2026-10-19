@@ -1,6 +1,7 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
-import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
+import { ConflictException } from '@nestjs/common';
+import { CommandHandler, ICommandHandler, QueryBus } from '@nestjs/cqrs';
 import { PrismaService } from '../../../prisma/prisma.service.js';
+import { rejectForeignUpload } from '../../upload-access.js';
 import { CancelUploadCommand } from '../cancel-upload.command.js';
 
 /**
@@ -10,7 +11,10 @@ import { CancelUploadCommand } from '../cancel-upload.command.js';
  */
 @CommandHandler(CancelUploadCommand)
 export class CancelUploadHandler implements ICommandHandler<CancelUploadCommand> {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly queryBus: QueryBus,
+  ) {}
 
   async execute({ userId, fileId }: CancelUploadCommand): Promise<void> {
     // One conditional delete: only the uploader's upload, and only while it is UPLOADING, so a
@@ -28,8 +32,7 @@ export class CancelUploadHandler implements ICommandHandler<CancelUploadCommand>
       select: { id: true },
     });
     if (!file) {
-      // Anyone else cannot tell it exists.
-      throw new NotFoundException('Upload not found');
+      return rejectForeignUpload(this.prisma, this.queryBus, userId, fileId);
     }
     throw new ConflictException('Upload is already complete; delete the file instead');
   }

@@ -1,10 +1,15 @@
 import { Query } from '@nestjs/cqrs';
-import type { Meeting } from '../../generated/prisma/client.js';
+import type { MeetingAccess, MeetingView } from '../meetings.types.js';
 
-export class GetMeetingQuery extends Query<Meeting> {
+/**
+ * Loads a meeting for `userId`: `404` when the user is neither its owner nor a participant,
+ * `403` when a participant asks for `manage` access.
+ */
+export class GetMeetingQuery extends Query<MeetingView> {
   constructor(
-    public readonly ownerId: string,
+    public readonly userId: string,
     public readonly id: string,
+    public readonly access: MeetingAccess = 'view',
   ) {
     super();
   }

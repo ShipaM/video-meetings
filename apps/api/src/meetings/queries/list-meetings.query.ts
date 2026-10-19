@@ -1,8 +1,9 @@
 import { Query } from '@nestjs/cqrs';
-import type { Meeting } from '../../generated/prisma/client.js';
+import type { MeetingView } from '../meetings.types.js';
 
-export class ListMeetingsQuery extends Query<Meeting[]> {
-  constructor(public readonly ownerId: string) {
+/** Meetings the user owns or participates in, each with the user's role. */
+export class ListMeetingsQuery extends Query<MeetingView[]> {
+  constructor(public readonly userId: string) {
     super();
   }
 }

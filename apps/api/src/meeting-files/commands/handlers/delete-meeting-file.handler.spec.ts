@@ -30,7 +30,7 @@ describe('DeleteMeetingFileHandler', () => {
 
     await handler.execute(new DeleteMeetingFileCommand('u1', 'm1', 'f1'));
 
-    expect(execute).toHaveBeenCalledWith(new GetMeetingQuery('u1', 'm1'));
+    expect(execute).toHaveBeenCalledWith(new GetMeetingQuery('u1', 'm1', 'manage'));
     expect(findFirst).toHaveBeenCalledWith({
       where: { id: 'f1', meetingId: 'm1', status: { not: 'UPLOADING' } },
       select: { storageKey: true },

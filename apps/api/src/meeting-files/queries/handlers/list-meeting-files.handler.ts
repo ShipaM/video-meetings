@@ -12,7 +12,7 @@ export class ListMeetingFilesHandler implements IQueryHandler<ListMeetingFilesQu
   ) {}
 
   async execute({ userId, meetingId }: ListMeetingFilesQuery): Promise<MeetingFileView[]> {
-    // Throws 404 for a missing meeting or one owned by somebody else.
+    // The owner and participants: 404 for anybody else.
     await this.queryBus.execute(new GetMeetingQuery(userId, meetingId));
 
     const files = await this.prisma.meetingFile.findMany({
