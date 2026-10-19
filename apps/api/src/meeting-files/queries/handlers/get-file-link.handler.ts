@@ -20,6 +20,7 @@ export class GetFileLinkHandler implements IQueryHandler<GetFileLinkQuery> {
   ) {}
 
   async execute({ userId, meetingId, fileId }: GetFileLinkQuery): Promise<FileLink> {
+    // The owner and participants: 404 for anybody else.
     await this.queryBus.execute(new GetMeetingQuery(userId, meetingId));
 
     const file = await this.prisma.meetingFile.findFirst({

@@ -41,7 +41,7 @@ describe('CreateUploadHandler', () => {
 
     const query = execute.mock.calls[0][0] as GetMeetingQuery;
     expect(query).toBeInstanceOf(GetMeetingQuery);
-    expect(query).toMatchObject({ ownerId: 'u1', id: 'm1' });
+    expect(query).toMatchObject({ userId: 'u1', id: 'm1', access: 'manage' });
     expect(create).toHaveBeenCalledWith({
       data: {
         id: 'f1',

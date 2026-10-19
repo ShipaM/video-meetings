@@ -25,8 +25,8 @@ export class CreateUploadHandler implements ICommandHandler<CreateUploadCommand>
       throw new BadRequestException('Upload metadata must contain meetingId and filename');
     }
 
-    // Throws 404 for a missing meeting or one owned by somebody else.
-    await this.queryBus.execute(new GetMeetingQuery(userId, meetingId));
+    // Only the owner uploads: 404 for a missing or foreign meeting, 403 for a participant.
+    await this.queryBus.execute(new GetMeetingQuery(userId, meetingId, 'manage'));
 
     // Keep only the last path segment of whatever the client sent.
     const originalName = filename.split(/[\\/]/).pop()?.trim() ?? '';

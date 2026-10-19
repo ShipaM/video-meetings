@@ -14,8 +14,8 @@ export class DeleteMeetingFileHandler implements ICommandHandler<DeleteMeetingFi
   ) {}
 
   async execute({ userId, meetingId, fileId }: DeleteMeetingFileCommand): Promise<void> {
-    // Throws 404 for a missing meeting or one owned by somebody else.
-    await this.queryBus.execute(new GetMeetingQuery(userId, meetingId));
+    // Only the owner deletes: 404 for a missing or foreign meeting, 403 for a participant.
+    await this.queryBus.execute(new GetMeetingQuery(userId, meetingId, 'manage'));
 
     // An upload in progress is cancelled through tus (`DELETE /uploads/:id`), not deleted here.
     const file = await this.prisma.meetingFile.findFirst({

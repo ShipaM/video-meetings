@@ -88,17 +88,17 @@ the meeting's file list and download the original. Files live on local disk, out
 **Affects:** backend / database
 **Tasks**
 
-- [ ] Prisma `MeetingParticipant` model (meeting and user, both `onDelete: Cascade`, unique pair) and a migration.
-- [ ] e2e tests first: add by e-mail; unknown e-mail, the owner's e-mail and an existing participant return an error
+- [x] Prisma `MeetingParticipant` model (meeting and user, both `onDelete: Cascade`, unique pair) and a migration.
+- [x] e2e tests first: add by e-mail; unknown e-mail, the owner's e-mail and an existing participant return an error
       and add nobody; the participant sees the meeting in `GET /meetings` marked as shared, can open it, list and
       download files, and does not see a file still `UPLOADING`; upload, cancel, delete and participant management by a
       participant return `403`; a removed participant and a stranger get `404` for the meeting, files and download
       links.
-- [ ] `POST /meetings/:id/participants` (`{ email }`, looks the user up through `FindUserByEmailQuery`),
+- [x] `POST /meetings/:id/participants` (`{ email }`, looks the user up through `FindUserByEmailQuery`),
       `GET /meetings/:id/participants`, `DELETE /meetings/:id/participants/:userId` - owner only.
-- [ ] Read handlers (meetings list/details, files list, download link) allow owner or participant; write handlers
+- [x] Read handlers (meetings list/details, files list, download link) allow owner or participant; write handlers
       return `403` for a participant and `404` for a stranger; meeting responses carry the caller's role / shared flag.
-- [ ] Unit tests for the new handlers; update `apps/api/CLAUDE.md`.
+- [x] Unit tests for the new handlers; update `apps/api/CLAUDE.md`.
       **Done when:** all e2e and unit suites are green, including the existing "foreign meeting gives 404" cases.
 
 ### Phase 6: UI - participants and read-only view

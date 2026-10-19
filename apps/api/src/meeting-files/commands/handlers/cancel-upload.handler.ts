@@ -1,6 +1,7 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
-import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
+import { ConflictException } from '@nestjs/common';
+import { CommandHandler, ICommandHandler, QueryBus } from '@nestjs/cqrs';
 import { PrismaService } from '../../../prisma/prisma.service.js';
+import { requireOwnUpload } from '../../upload-access.js';
 import { CancelUploadCommand } from '../cancel-upload.command.js';
 
 /**
@@ -10,7 +11,10 @@ import { CancelUploadCommand } from '../cancel-upload.command.js';
  */
 @CommandHandler(CancelUploadCommand)
 export class CancelUploadHandler implements ICommandHandler<CancelUploadCommand> {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly queryBus: QueryBus,
+  ) {}
 
   async execute({ userId, fileId }: CancelUploadCommand): Promise<void> {
     // One conditional delete: only the uploader's upload, and only while it is UPLOADING, so a
@@ -22,15 +26,13 @@ export class CancelUploadHandler implements ICommandHandler<CancelUploadCommand>
       return;
     }
 
-    // Nothing deleted: tell a completed upload from one that is not the caller's.
-    const file = await this.prisma.meetingFile.findFirst({
-      where: { id: fileId, uploadedById: userId },
-      select: { id: true },
+    // Nothing deleted: tell a completed upload from one that is not the caller's (a single read,
+    // so the answer cannot mix two states of the row).
+    const file = await this.prisma.meetingFile.findUnique({
+      where: { id: fileId },
+      select: { uploadedById: true, meetingId: true },
     });
-    if (!file) {
-      // Anyone else cannot tell it exists.
-      throw new NotFoundException('Upload not found');
-    }
+    await requireOwnUpload(this.queryBus, userId, file);
     throw new ConflictException('Upload is already complete; delete the file instead');
   }
 }
