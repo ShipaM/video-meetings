@@ -11,13 +11,14 @@ describe('FindUsersByIdsHandler', () => {
   });
 
   it('looks the users up in one query', async () => {
-    const records = [{ id: 'u1', email: 'a@example.com', passwordHash: 'hash' }];
+    const records = [{ id: 'u1', email: 'a@example.com' }];
     findMany.mockResolvedValue(records);
 
     await expect(handler.execute(new FindUsersByIdsQuery(['u1', 'u2']))).resolves.toEqual(records);
-    expect(findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: { in: ['u1', 'u2'] } } }),
-    );
+    expect(findMany).toHaveBeenCalledWith({
+      where: { id: { in: ['u1', 'u2'] } },
+      select: { id: true, email: true },
+    });
   });
 
   it('does not query the database for an empty list', async () => {

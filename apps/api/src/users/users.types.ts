@@ -4,3 +4,6 @@ export interface UserRecord {
   email: string;
   passwordHash: string;
 }
+
+/** The public part of a user (no password hash), for showing users to other users. */
+export type UserContact = Pick<UserRecord, 'id' | 'email'>;
