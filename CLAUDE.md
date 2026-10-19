@@ -37,6 +37,8 @@ Target one workspace with `npm run <script> --workspace=web|api`.
 
 - Single Prettier config in the root `.prettierrc` (single quotes, trailing commas, width 100); ESLint config is per app.
 - The repository is English-only: documentation, code comments and commit messages are in English.
+- Commit messages and pull request descriptions never mention an AI assistant, chatbot or Claude Code: no
+  "Generated with Claude Code" line, no `Co-Authored-By` trailer for an AI, plain conventional commits only.
 - If `next build` fails with a `useContext` / prerender error, check that `NODE_ENV` is not set to `development` in the shell.
 
 ## Git hooks
