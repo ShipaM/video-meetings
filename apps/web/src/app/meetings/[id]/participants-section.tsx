@@ -195,15 +195,23 @@ export function ParticipantsSection({ meetingId }: { meetingId: string }) {
     const result = await addParticipant(meetingId, value);
     setIsPending(false);
     if (result.type === 'added') {
+      const added = result.participant;
       if (state.type === 'ready') {
-        setState({ ...state, participants: [...state.participants, result.participant] });
+        // Updater, not the `state` captured before the await: a removal meanwhile must stay, and a
+        // list that loaded meanwhile may already hold the new participant.
+        setState((current) =>
+          current.type === 'ready' &&
+          !current.participants.some((item) => item.userId === added.userId)
+            ? { ...current, participants: [...current.participants, added] }
+            : current,
+        );
       } else {
         // The list never loaded: load it now, so the new participant shows up.
         setState({ type: 'loading' });
         void listParticipants(meetingId).then(applyResult);
       }
       setEmail('');
-      setAnnouncement(`${result.participant.email} can now open this meeting.`);
+      setAnnouncement(`${added.email} can now open this meeting.`);
     } else if (result.type === 'error') {
       setError(result.message);
       inputRef.current?.focus();
