@@ -73,10 +73,10 @@ the meeting's file list and download the original. Files live on local disk, out
 **Affects:** frontend
 **Tasks**
 
-- [ ] Cancel button per upload in progress; the cancelled file disappears from the list.
-- [ ] A network error shows an error on that file with "Retry", which resumes from the server offset without
+- [x] Cancel button per upload in progress; the cancelled file disappears from the list.
+- [x] A network error shows an error on that file with "Retry", which resumes from the server offset without
       re-selecting the file (same page session).
-- [ ] Delete with a confirmation dialog.
+- [x] Delete with a confirmation dialog.
 - [ ] `ui-ux-pro-max` + Playwright MCP visual check, including an offline/online cut mid-upload.
       **Done when:** in the browser cancel leaves nothing in the list, a cut-and-restored upload continues from where
       it stopped after "Retry", and a deleted file disappears from the list.
