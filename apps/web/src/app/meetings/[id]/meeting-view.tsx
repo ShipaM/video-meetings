@@ -7,7 +7,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { clearAccessToken, useAccessToken } from '../../auth-storage';
 import { API_URL, SERVER_UNAVAILABLE_MESSAGE } from '../../constants';
 import { formatMeetingDate, type Meeting, type MeetingFile } from '../../meetings';
+import { SharedChip } from '../../shared-chip';
 import { FileList } from './file-list';
+import { ParticipantsSection } from './participants-section';
 import { UploadArea } from './upload-area';
 
 type PageState =
@@ -137,6 +139,9 @@ export function MeetingView({ meetingId }: { meetingId: string }) {
 
   if (!token) return <main className="flex flex-1" aria-busy="true" />;
 
+  // Participants get a read-only page: no upload, delete or participant management.
+  const isOwner = state.type === 'ready' && state.meeting.role === 'owner';
+
   return (
     <main className="flex flex-1 items-start justify-center p-4 pt-16 sm:p-6 sm:pt-20">
       <Card className="glass-card w-full max-w-3xl rounded-3xl p-5 sm:p-8">
@@ -188,16 +193,26 @@ export function MeetingView({ meetingId }: { meetingId: string }) {
               >
                 ← All meetings
               </Link>
-              <h1 className="text-2xl font-semibold wrap-break-word">{state.meeting.title}</h1>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <h1 className="min-w-0 text-2xl font-semibold wrap-break-word">
+                  {state.meeting.title}
+                </h1>
+                {!isOwner && <SharedChip />}
+              </div>
               <Card.Description>
                 <time dateTime={state.meeting.startsAt}>
                   {formatMeetingDate(state.meeting.startsAt)}
                 </time>
               </Card.Description>
+              {!isOwner && (
+                <p className="text-muted text-sm">
+                  Shared with you: you can view and download files, only the owner can change them.
+                </p>
+              )}
             </Card.Header>
 
             <Card.Content className="flex flex-col gap-6 pt-4">
-              <UploadArea meetingId={state.meeting.id} onUploaded={refresh} />
+              {isOwner && <UploadArea meetingId={state.meeting.id} onUploaded={refresh} />}
 
               <section aria-labelledby="files-heading" className="flex flex-col gap-3">
                 <h2
@@ -208,8 +223,10 @@ export function MeetingView({ meetingId }: { meetingId: string }) {
                 >
                   Files{state.files.length > 0 ? ` (${state.files.length})` : ''}
                 </h2>
-                <FileList files={state.files} onDeleted={removeFile} />
+                <FileList files={state.files} onDeleted={isOwner ? removeFile : undefined} />
               </section>
+
+              {isOwner && <ParticipantsSection meetingId={state.meeting.id} />}
             </Card.Content>
           </>
         )}

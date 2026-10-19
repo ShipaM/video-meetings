@@ -6,6 +6,7 @@ import { formatFileSize, formatMeetingDate, type MeetingFile } from '../../meeti
 import { DIALOG_CLOSE_FALLBACK_MS, FILE_KIND_LABEL, FILE_STATUS } from './constants';
 import { getExtension } from './file-types';
 import { deleteFile, downloadFile } from './files-api';
+import { UnmountListener } from './unmount-listener';
 
 /** Extension in upper case for display, e.g. `PDF`; falls back to the file kind. */
 function getTypeLabel(file: MeetingFile): string {
@@ -31,19 +32,6 @@ function TrashIcon() {
       <path d="M10 11v6M14 11v6" />
     </svg>
   );
-}
-
-/**
- * Calls `onUnmount` when the dialog content leaves the DOM, i.e. after its exit animation. React
- * Aria's `ModalOverlay` has no "closed" callback; unmounting the content is its end of closing.
- */
-function UnmountListener({ onUnmount }: { onUnmount: () => void }) {
-  const callback = useRef(onUnmount);
-  useEffect(() => {
-    callback.current = onUnmount;
-  }, [onUnmount]);
-  useEffect(() => () => callback.current(), []);
-  return null;
 }
 
 /** Delete button with a confirmation dialog; the dialog stays open until the API has answered. */
@@ -138,7 +126,14 @@ function DeleteFileButton({ file, onDeleted }: { file: MeetingFile; onDeleted: (
   );
 }
 
-function FileRow({ file, onDeleted }: { file: MeetingFile; onDeleted: () => void }) {
+function FileRow({
+  file,
+  onDeleted,
+}: {
+  file: MeetingFile;
+  /** Absent for a participant, who may not delete (no button is shown). */
+  onDeleted?: () => void;
+}) {
   const [isPending, setIsPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const status = FILE_STATUS[file.status];
@@ -181,7 +176,7 @@ function FileRow({ file, onDeleted }: { file: MeetingFile; onDeleted: () => void
         >
           Download
         </Button>
-        <DeleteFileButton file={file} onDeleted={onDeleted} />
+        {onDeleted && <DeleteFileButton file={file} onDeleted={onDeleted} />}
       </div>
     </li>
   );
@@ -192,19 +187,22 @@ export function FileList({
   onDeleted,
 }: {
   files: MeetingFile[];
-  onDeleted: (fileId: string) => void;
+  /** Omitted for a read-only (participant) view: the delete buttons are hidden. */
+  onDeleted?: (fileId: string) => void;
 }) {
   if (files.length === 0) {
     return (
       <p className="border-default rounded-2xl border border-dashed p-6 text-center text-sm">
-        No files yet. Upload recordings, documents or images above.
+        {onDeleted
+          ? 'No files yet. Upload recordings, documents or images above.'
+          : 'No files yet. The owner has not uploaded anything to this meeting.'}
       </p>
     );
   }
   return (
     <ul className="flex flex-col gap-2">
       {files.map((file) => (
-        <FileRow key={file.id} file={file} onDeleted={() => onDeleted(file.id)} />
+        <FileRow key={file.id} file={file} onDeleted={onDeleted && (() => onDeleted(file.id))} />
       ))}
     </ul>
   );
