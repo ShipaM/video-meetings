@@ -10,6 +10,12 @@ export const UPLOAD_CHUNK_SIZE = 32 * 1024 ** 2;
 /** Automatic retries for short network blips before the upload is shown as failed. */
 export const UPLOAD_RETRY_DELAYS = [0, 1000, 3000, 5000];
 
+/**
+ * Responses after which "Retry" cannot help: the API rejected the file (and removed what it had),
+ * the meeting is gone or the session ended. Anything else, a network error included, may resume.
+ */
+export const NOT_RETRYABLE_STATUSES = [400, 401, 403, 404, 413];
+
 /** Uploads running at the same time; the rest wait in the queue. */
 export const MAX_PARALLEL_UPLOADS = 3;
 

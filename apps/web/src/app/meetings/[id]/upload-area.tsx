@@ -25,8 +25,14 @@ function UploadIcon() {
   );
 }
 
-function UploadRow({ item, onDismiss }: { item: UploadItem; onDismiss: () => void }) {
+type UploadRowProps = { item: UploadItem; onRetry: () => void; onCancel: () => void };
+
+function UploadRow({ item, onRetry, onCancel }: UploadRowProps) {
   const hasError = item.status === 'rejected' || item.status === 'failed';
+  const isActive = item.status === 'queued' || item.status === 'uploading';
+  // A failed upload that can resume keeps its bar, so the owner sees where it stopped.
+  const showProgress = !hasError || item.canRetry;
+  const progressColor = hasError ? 'danger' : item.status === 'done' ? 'success' : 'accent';
 
   return (
     <li
@@ -41,14 +47,27 @@ function UploadRow({ item, onDismiss }: { item: UploadItem; onDismiss: () => voi
             {formatFileSize(item.size)} · {UPLOAD_STATUS_TEXT[item.status]}
           </span>
         </div>
-        {hasError && <CloseButton aria-label={`Dismiss ${item.name}`} onPress={onDismiss} />}
+        {isActive && (
+          <Button
+            size="sm"
+            variant="tertiary"
+            className="min-h-11 shrink-0 sm:min-h-9"
+            aria-label={`Cancel upload of ${item.name}`}
+            onPress={onCancel}
+          >
+            Cancel
+          </Button>
+        )}
+        {hasError && !item.canRetry && (
+          <CloseButton aria-label={`Dismiss ${item.name}`} onPress={onCancel} />
+        )}
       </div>
 
-      {!hasError && (
+      {showProgress && (
         <ProgressBar
-          aria-label={`Uploading ${item.name}`}
+          aria-label={`Upload progress of ${item.name}`}
           value={Math.round(item.progress * 100)}
-          color={item.status === 'done' ? 'success' : 'accent'}
+          color={progressColor}
           size="sm"
           className="gap-1"
         >
@@ -64,6 +83,29 @@ function UploadRow({ item, onDismiss }: { item: UploadItem; onDismiss: () => voi
           {item.error}
         </p>
       )}
+
+      {item.status === 'failed' && item.canRetry && (
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            variant="secondary"
+            className="min-h-11 flex-1 sm:min-h-9 sm:flex-none"
+            aria-label={`Retry upload of ${item.name}`}
+            onPress={onRetry}
+          >
+            Retry
+          </Button>
+          <Button
+            size="sm"
+            variant="tertiary"
+            className="min-h-11 flex-1 sm:min-h-9 sm:flex-none"
+            aria-label={`Cancel upload of ${item.name}`}
+            onPress={onCancel}
+          >
+            Cancel
+          </Button>
+        </div>
+      )}
     </li>
   );
 }
@@ -75,7 +117,7 @@ export function UploadArea({
   meetingId: string;
   onUploaded: () => Promise<void>;
 }) {
-  const { items, addFiles, dismiss } = useFileUploads(meetingId, onUploaded);
+  const { items, addFiles, retry, cancel } = useFileUploads(meetingId, onUploaded);
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   // dragenter/dragleave fire for every child; count them to know when the pointer really left.
@@ -157,7 +199,12 @@ export function UploadArea({
 
       <ul aria-label="Uploads" className="flex flex-col gap-2 empty:hidden">
         {items.map((item) => (
-          <UploadRow key={item.key} item={item} onDismiss={() => dismiss(item.key)} />
+          <UploadRow
+            key={item.key}
+            item={item}
+            onRetry={() => retry(item.key)}
+            onCancel={() => cancel(item.key)}
+          />
         ))}
       </ul>
     </section>
