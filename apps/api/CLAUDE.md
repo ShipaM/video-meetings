@@ -32,10 +32,10 @@ Standard Nest module/controller/service layout:
 - `src/prisma/` - global `PrismaModule` / `PrismaService` (Prisma 7 with the `@prisma/adapter-pg` driver adapter)
 - `src/auth/` - `AuthModule`: `POST /auth/register` and `POST /auth/login`, token issuing and `JwtAuthGuard` (see below)
 - `src/users/` - `UsersModule`: creating and looking up users, no HTTP routes yet (see below)
-- `src/meetings/` - `MeetingsModule`: `POST /meetings`, `GET /meetings`, `GET /meetings/:id` (see below)
+- `src/meetings/` - `MeetingsModule`: meetings and their participants, `/meetings[/:id[/participants]]` (see below)
 - `src/meeting-files/` - `MeetingFilesModule`: resumable upload (tus), file list and signed downloads (see below)
-- `prisma/schema.prisma`, `prisma/migrations/`, `prisma.config.ts` - Prisma schema (`User`, `Meeting`, `MeetingFile`), migrations and CLI config
-- `test/auth.e2e-spec.ts`, `test/meetings.e2e-spec.ts`, `test/meeting-files.e2e-spec.ts` - e2e tests using supertest against the Nest app and the real database (written first, TDD); `test/tus.helpers.ts` - tus metadata, fake MP4, interrupted PATCH, binary body parser
+- `prisma/schema.prisma`, `prisma/migrations/`, `prisma.config.ts` - Prisma schema (`User`, `Meeting`, `MeetingParticipant`, `MeetingFile`), migrations and CLI config
+- `test/auth.e2e-spec.ts`, `test/meetings.e2e-spec.ts`, `test/meeting-files.e2e-spec.ts`, `test/meeting-participants.e2e-spec.ts` - e2e tests using supertest against the Nest app and the real database (written first, TDD); `test/tus.helpers.ts` - tus metadata, fake MP4, interrupted PATCH, binary body parser
 - `src/**/handlers/*.handler.spec.ts` - unit tests of the CQRS handlers (Prisma and the buses are mocked)
 - `scripts/upload-check.mjs` - manual large-upload check with `tus-js-client` (not part of any test run)
 
@@ -43,14 +43,14 @@ Standard Nest module/controller/service layout:
 
 `AppModule` imports `CqrsModule.forRoot()` (global `CommandBus` / `QueryBus`), `PrismaModule` (global) and the four feature modules:
 
-| Module               | Responsibility                                                                | Public surface                                                                                                                | Talks to                                                                                     |
-| -------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `AuthModule`         | registration, login, password hashing, JWT issuing and verification           | `POST /auth/register`, `POST /auth/login`, `JwtAuthGuard`, `JwtModule`                                                        | Users, through `CreateUserCommand` / `FindUserByEmailQuery`                                  |
-| `UsersModule`        | the `User` table: creating and looking users up (profile etc. will live here) | CQRS messages from `src/users/index.ts`, no HTTP routes yet                                                                   | Prisma only                                                                                  |
-| `MeetingsModule`     | meetings owned by the signed-in user                                          | `POST /meetings`, `GET /meetings`, `GET /meetings/:id`; `GetMeetingQuery` (`src/meetings/index.ts`)                           | imports `AuthModule` for `JwtAuthGuard`                                                      |
-| `MeetingFilesModule` | the `MeetingFile` table and the files on disk (`FILES_DIR`)                   | `/uploads` (tus), `GET` / `DELETE /meetings/:id/files[/:fileId]`, `POST .../files/:fileId/link`, `GET /files/:fileId/content` | Meetings, through `GetMeetingQuery` (ownership); `AuthModule` for the guard and `JwtService` |
+| Module               | Responsibility                                                                | Public surface                                                                                                                | Talks to                                                                                              |
+| -------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `AuthModule`         | registration, login, password hashing, JWT issuing and verification           | `POST /auth/register`, `POST /auth/login`, `JwtAuthGuard`, `JwtModule`                                                        | Users, through `CreateUserCommand` / `FindUserByEmailQuery`                                           |
+| `UsersModule`        | the `User` table: creating and looking users up (profile etc. will live here) | CQRS messages from `src/users/index.ts`, no HTTP routes yet                                                                   | Prisma only                                                                                           |
+| `MeetingsModule`     | meetings, their participants and the access rules (owner / participant)       | `/meetings`, `/meetings/:id`, `/meetings/:id/participants[/:userId]`; `GetMeetingQuery` (`src/meetings/index.ts`)             | imports `AuthModule` for `JwtAuthGuard`; Users through `FindUserByEmailQuery` / `FindUsersByIdsQuery` |
+| `MeetingFilesModule` | the `MeetingFile` table and the files on disk (`FILES_DIR`)                   | `/uploads` (tus), `GET` / `DELETE /meetings/:id/files[/:fileId]`, `POST .../files/:fileId/link`, `GET /files/:fileId/content` | Meetings, through `GetMeetingQuery` (access rules); `AuthModule` for the guard and `JwtService`       |
 
-Dependencies point one way: MeetingFiles -> (buses) -> Meetings -> Auth -> (buses) -> Users. Users knows nothing about Auth, Meetings nothing about files.
+Dependencies point one way: MeetingFiles -> (buses) -> Meetings -> (buses) -> Users, and Meetings -> Auth -> (buses) -> Users. Users knows nothing about Auth or Meetings, Meetings nothing about files.
 
 Layout of a feature module (Auth, Users, Meetings and MeetingFiles follow it):
 
@@ -88,6 +88,7 @@ A global `ValidationPipe` (`whitelist: true`) is registered in `src/main.ts` and
 | `CreateUserCommand(email, hash)` | the stored `UserRecord`; lower-cases the e-mail, `409 ConflictException` when it is taken |
 | `FindUserByEmailQuery(email)`    | `UserRecord` or `null`; the lookup is case-insensitive (the e-mail is lower-cased)        |
 | `FindUserByIdQuery(id)`          | `UserRecord` or `null`                                                                    |
+| `FindUsersByIdsQuery(ids)`       | `UserRecord[]` (unknown ids are left out); one query, used for participant e-mails        |
 
 `UserRecord` (`id`, `email`, `passwordHash`) is internal: never return it from a controller. Profile and other user features go into this module.
 
@@ -97,28 +98,50 @@ Auth does the credential work and talks to Users over the buses: `RegisterUserHa
 
 All routes require `Authorization: Bearer <accessToken>` (`JwtAuthGuard` in `src/auth/`, exported by `AuthModule`; it verifies the JWT and sets `request.user = { id, email }`, typed as `AuthenticatedRequest`). Missing or invalid token gives `401`.
 
-| Route               | Behaviour                                                                                |
-| ------------------- | ---------------------------------------------------------------------------------------- |
-| `POST /meetings`    | body `{ title, startsAt }` (ISO date), `201` with the meeting; `400` on missing/invalid  |
-| `GET /meetings`     | `200`, only the caller's meetings, ordered by `startsAt`                                 |
-| `GET /meetings/:id` | `200`; `404` if it does not exist **or belongs to another user**; `400` on a non-UUID id |
+| Route               | Behaviour                                                                                                        |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `POST /meetings`    | body `{ title, startsAt }` (ISO date), `201` with the meeting (`role: 'owner'`); `400` on missing/invalid        |
+| `GET /meetings`     | `200`, the meetings the caller owns **and** those shared with them, ordered by `startsAt`, each with its `role`  |
+| `GET /meetings/:id` | `200` with `role`; `404` if it does not exist **or the caller is neither owner nor participant**; `400` non-UUID |
 
-The `Meeting` Prisma model belongs to a `User` (`onDelete: Cascade`).
+A meeting response (`MeetingView`) is `{ id, title, startsAt, ownerId, role, createdAt, updatedAt }`; `role` is `'owner'` or `'participant'` (a shared meeting). The `Meeting` Prisma model belongs to a `User` (`onDelete: Cascade`).
+
+### Participants and access rules
+
+The owner shares a meeting with registered users; `MeetingParticipant` (primary key `meetingId` + `userId`, both `onDelete: Cascade`) holds the pairs.
+
+| Route                                       | Behaviour                                                                                                                                                                                                                                                           |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /meetings/:id/participants`           | body `{ email }` (looked up case-insensitively through `FindUserByEmailQuery`); `201 { userId, email, addedAt }`. `404` unregistered e-mail, `400` the owner's own or an invalid e-mail, `409` already a participant (the primary key also settles concurrent adds) |
+| `GET /meetings/:id/participants`            | `200 [{ userId, email, addedAt }]`, oldest first; e-mails come from Users (`FindUsersByIdsQuery`)                                                                                                                                                                   |
+| `DELETE /meetings/:id/participants/:userId` | `204`; `404` if that user is not a participant, `400` non-UUID. Access ends at once, download links issued earlier included                                                                                                                                         |
+
+All three are owner only: `403` for a participant, `404` for anybody else.
+
+Every access check goes through `GetMeetingQuery(userId, meetingId, access = 'view')`, the only place that knows the rules. It returns the `MeetingView`:
+
+| Caller       | `view`: meeting, meetings list, files list, download link and content | `manage`: upload, cancel, file deletion, participants |
+| ------------ | --------------------------------------------------------------------- | ----------------------------------------------------- |
+| owner        | allowed                                                               | allowed                                               |
+| participant  | allowed                                                               | `403`                                                 |
+| anybody else | `404` (a foreign meeting looks like a missing one)                    | `404`                                                 |
+
+tus requests on an existing upload (`HEAD`, `PATCH`, `DELETE /uploads/:id`) look the upload up by its uploader; for anyone else `rejectForeignUpload` (`src/meeting-files/upload-access.ts`) asks `GetMeetingQuery(..., 'manage')`, so a participant gets `403` and a stranger or a missing upload `404`. Participants never see `UPLOADING` files: the files list and download links skip them for everybody.
 
 ## Meeting files
 
-`MeetingFilesModule` (`src/meeting-files/`) stores files of a meeting on local disk. Design and library choices: `docs/research-meeting-upload.md` (repository root). Until participants arrive (Phase 5) only the meeting owner has access.
+`MeetingFilesModule` (`src/meeting-files/`) stores files of a meeting on local disk. Design and library choices: `docs/research-meeting-upload.md` (repository root). Access follows the meeting rules above: the owner and participants read, only the owner writes.
 
 ### Resumable upload (tus 1.0)
 
 `@tus/server` + `@tus/file-store` run inside `UploadsController` (`TusService`), behind `JwtAuthGuard`; the tus hooks only dispatch CQRS messages. Upload id = `MeetingFile.id` (UUID). The meeting id travels in `Upload-Metadata` (`meetingId`, `filename`, `filetype`, base64), not in the URL. Every request needs `Tus-Resumable: 1.0.0` (else `412`).
 
-| Route                 | Behaviour                                                                                                                                                                                                                                                                                                                                                                             |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST /uploads`       | `Upload-Length` + `Upload-Metadata`; `201` with `Location: /uploads/<id>`, creates an `UPLOADING` row (`CreateUploadCommand`). `413` over 2 GiB, `400` missing metadata or a type outside the allow-list, `404` foreign/missing meeting, `507` when free space minus the bytes active uploads still have to write (uploads with a chunk in the last 24 h) is below the size + 512 MiB |
-| `HEAD /uploads/:id`   | `200` with `Upload-Offset` / `Upload-Length`; `404` if the upload is not the caller's (`AuthorizeUploadRequestCommand`)                                                                                                                                                                                                                                                               |
-| `PATCH /uploads/:id`  | `Upload-Offset` + `Content-Type: application/offset+octet-stream`; `204` with the new offset, `409` on an offset mismatch or a completed upload, `404` if not the caller's. Each PATCH sets `lastChunkAt`; the last chunk runs `CompleteUploadCommand`                                                                                                                                |
-| `DELETE /uploads/:id` | cancel (tus termination): `204`, removes the `UPLOADING` row (`CancelUploadCommand`, in `onIncomingRequest`), then tus removes the partial data under its upload lock (a chunk still being written is stopped). `409` for a completed upload (delete the file instead), `404` if not the caller's                                                                                     |
+| Route                 | Behaviour                                                                                                                                                                                                                                                                                                                                                                                                      |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /uploads`       | `Upload-Length` + `Upload-Metadata`; `201` with `Location: /uploads/<id>`, creates an `UPLOADING` row (`CreateUploadCommand`). `413` over 2 GiB, `400` missing metadata or a type outside the allow-list, `404` foreign/missing meeting, `403` for a participant, `507` when free space minus the bytes active uploads still have to write (uploads with a chunk in the last 24 h) is below the size + 512 MiB |
+| `HEAD /uploads/:id`   | `200` with `Upload-Offset` / `Upload-Length`; `404` if the upload is not the caller's, `403` for a participant of its meeting (`AuthorizeUploadRequestCommand`)                                                                                                                                                                                                                                                |
+| `PATCH /uploads/:id`  | `Upload-Offset` + `Content-Type: application/offset+octet-stream`; `204` with the new offset, `409` on an offset mismatch or a completed upload, `404` if not the caller's, `403` for a participant. Each PATCH sets `lastChunkAt`; the last chunk runs `CompleteUploadCommand`                                                                                                                                |
+| `DELETE /uploads/:id` | cancel (tus termination): `204`, removes the `UPLOADING` row (`CancelUploadCommand`, in `onIncomingRequest`), then tus removes the partial data under its upload lock (a chunk still being written is stopped). `409` for a completed upload (delete the file instead), `404` if not the caller's, `403` for a participant                                                                                     |
 
 Completion checks the magic bytes (`file-type`; TXT: valid UTF-8 without NUL) against the stored type: a mismatch deletes the row and the data and answers `400`; otherwise the file becomes `READY` (no processing yet). If completion fails with an unexpected error (e.g. the database), tus never calls the hook again; so `HEAD` / `PATCH` on an `UPLOADING` file whose bytes are all stored runs `CompleteUploadCommand` again (the client's retry). `CompleteUploadCommand` is idempotent (conditional `updateMany` / `deleteMany`). An unreadable data file counts as a type mismatch. tus `GET` is not routed. The allow-list (extension primary, declared MIME must agree, empty or `application/octet-stream` accepted) lives in `file-types.ts`.
 
@@ -126,7 +149,7 @@ Completion checks the magic bytes (`file-type`; TXT: valid UTF-8 without NUL) ag
 
 | Route                                   | Behaviour                                                                                                                                                                                                                                                                                                                                                           |
 | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /meetings/:id/files`               | bearer token; `200` completed files (not `UPLOADING`), newest first, `size` as a number; `404` foreign meeting, `400` non-UUID                                                                                                                                                                                                                                      |
+| `GET /meetings/:id/files`               | bearer token; `200` completed files (not `UPLOADING`), newest first, `size` as a number, for the owner and participants; `404` foreign meeting, `400` non-UUID                                                                                                                                                                                                      |
 | `POST /meetings/:id/files/:fileId/link` | bearer token; `201 { url, expiresAt }`, `url` = `/files/:fileId/content?token=...` (relative to the API), valid 5 minutes; `404` foreign/missing/`UPLOADING` file                                                                                                                                                                                                   |
 | `GET /files/:fileId/content?token=`     | **no** bearer token (for `<a download>`); `401` missing/invalid/expired token or a token for another file, `404` when access is gone; streams with `res.sendFile` (Range, ETag), `Content-Type` = stored MIME, `Content-Disposition: attachment` with the original name (RFC 5987 `filename*` for non-ASCII), `nosniff`, `no-store`, `Referrer-Policy: no-referrer` |
 
@@ -134,9 +157,9 @@ Link tokens are JWTs signed with `FILE_LINK_SECRET` and audience `file-content` 
 
 ### Delete a file
 
-| Route                                | Behaviour                                                                                                                                                                                                                                                     |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DELETE /meetings/:id/files/:fileId` | bearer token; `204`, removes the row and then the stored original (`DeleteMeetingFileCommand`); links issued earlier then give `404`. `404` foreign/missing meeting or file and for an `UPLOADING` file (cancelled via `DELETE /uploads/:id`), `400` non-UUID |
+| Route                                | Behaviour                                                                                                                                                                                                                                                                              |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DELETE /meetings/:id/files/:fileId` | bearer token; `204`, removes the row and then the stored original (`DeleteMeetingFileCommand`); links issued earlier then give `404`. `404` foreign/missing meeting or file and for an `UPLOADING` file (cancelled via `DELETE /uploads/:id`), `403` for a participant, `400` non-UUID |
 
 ### Abandoned uploads and orphan files
 
@@ -157,16 +180,16 @@ Removal order everywhere (cancel, cleanup, delete, type mismatch): **row first, 
 
 ### CQRS pattern (auth, users, meetings and meeting files)
 
-Controllers hold no logic: they build a `Command` (writes) or `Query` (reads) and dispatch it through `CommandBus` / `QueryBus`. Each module has `commands/` and `queries/` with the message class, a `handlers/` folder and an `index.ts` exporting the handler array that the module lists in `providers`. Handlers use `PrismaService` directly (no service layer), except Auth handlers, which call Users through the buses. Modules do not import each other's handlers or Prisma models; they send the other module's exported messages (`CommandBus` / `QueryBus` are global thanks to `CqrsModule.forRoot()` in `AppModule`). Authorization of data is done in the handler by filtering on `ownerId`.
+Controllers hold no logic: they build a `Command` (writes) or `Query` (reads) and dispatch it through `CommandBus` / `QueryBus`. Each module has `commands/` and `queries/` with the message class, a `handlers/` folder and an `index.ts` exporting the handler array that the module lists in `providers`. Handlers use `PrismaService` directly (no service layer), except Auth handlers, which call Users through the buses. Modules do not import each other's handlers or Prisma models; they send the other module's exported messages (`CommandBus` / `QueryBus` are global thanks to `CqrsModule.forRoot()` in `AppModule`). Authorization of data is done in the handlers: `GetMeetingQuery` filters by owner or participant and checks the requested access (`view` / `manage`); other modules dispatch it instead of filtering themselves.
 
 ## Testing
 
 Two kinds of tests, both on Vitest (`globals: true`, so `describe` / `it` / `vi` need no import):
 
-| Kind | Files                | Config                 | Needs                                 | What it covers                                                                               |
-| ---- | -------------------- | ---------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------- |
-| Unit | `src/**/*.spec.ts`   | `vitest.config.ts`     | nothing (Prisma and the buses mocked) | each CQRS handler in isolation (Auth, Users, MeetingFiles), the file type allow-list         |
-| e2e  | `test/*.e2e-spec.ts` | `vitest.config.e2e.ts` | the database, `.env`                  | the whole Nest app over HTTP with supertest: `/auth/*`, `/meetings*`, `/uploads`, `/files/*` |
+| Kind | Files                | Config                 | Needs                                 | What it covers                                                                                                                     |
+| ---- | -------------------- | ---------------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Unit | `src/**/*.spec.ts`   | `vitest.config.ts`     | nothing (Prisma and the buses mocked) | each CQRS handler in isolation (Auth, Users, Meetings, MeetingFiles), the file type allow-list                                     |
+| e2e  | `test/*.e2e-spec.ts` | `vitest.config.e2e.ts` | the database, `.env`                  | the whole Nest app over HTTP with supertest: `/auth/*`, `/meetings*` (incl. participants and access rules), `/uploads`, `/files/*` |
 
 ### Running unit tests
 
@@ -197,7 +220,7 @@ npx vitest run --config ./vitest.config.e2e.ts test/auth.e2e-spec.ts   # one sui
 npx vitest run --config ./vitest.config.e2e.ts -t "POST /auth/login"   # one test by name
 ```
 
-Suites run one after another (`fileParallelism: false`) because they share the database. Each suite uses unique e-mails (`<name>-<timestamp>@example.com`) and deletes the users it created in `afterAll`, so reruns do not collide and the data stays clean; a crashed run can leave a few `*-<timestamp>@example.com` rows behind. `meeting-files.e2e-spec.ts` sets `FILES_DIR` to a fresh temporary directory before the app is created and removes it in `afterAll`, and checks that cancel, cleanup and delete leave nothing of a file in it; it listens on a real port (`app.listen(0)`) to cut a `PATCH` mid-stream for the resume tests. A tus request answered with an error before its body is read (`404`, `409`) closes the connection, so such requests send a small body (a large one fails with `ECONNRESET`).
+Suites run one after another (`fileParallelism: false`) because they share the database. Each suite uses unique e-mails (`<name>-<timestamp>@example.com`) and deletes the users it created in `afterAll`, so reruns do not collide and the data stays clean; a crashed run can leave a few `*-<timestamp>@example.com` rows behind. `meeting-files.e2e-spec.ts` and `meeting-participants.e2e-spec.ts` set `FILES_DIR` to a fresh temporary directory before the app is created and remove it in `afterAll`. `meeting-files.e2e-spec.ts` also checks that cancel, cleanup and delete leave nothing of a file in it; it listens on a real port (`app.listen(0)`) to cut a `PATCH` mid-stream for the resume tests. A tus request answered with an error before its body is read (`404`, `409`) closes the connection, so such requests send a small body (a large one fails with `ECONNRESET`).
 
 ### Before you finish a change
 
