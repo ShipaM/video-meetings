@@ -95,6 +95,7 @@ export function MeetingView({ meetingId }: { meetingId: string }) {
 
   // Uploads finishing close together refresh concurrently; only the latest request may apply,
   // and an older one resolves when the latest has applied (so its upload row is removed then).
+  const filesHeading = useRef<HTMLHeadingElement>(null);
   const refreshId = useRef(0);
   const latestRefresh = useRef<Promise<void>>(Promise.resolve());
 
@@ -128,6 +129,8 @@ export function MeetingView({ meetingId }: { meetingId: string }) {
           : current,
       );
       void refresh();
+      // The delete button left with its row; keep keyboard focus in the file section.
+      requestAnimationFrame(() => filesHeading.current?.focus());
     },
     [refresh],
   );
@@ -197,7 +200,12 @@ export function MeetingView({ meetingId }: { meetingId: string }) {
               <UploadArea meetingId={state.meeting.id} onUploaded={refresh} />
 
               <section aria-labelledby="files-heading" className="flex flex-col gap-3">
-                <h2 id="files-heading" className="text-muted text-sm font-medium">
+                <h2
+                  id="files-heading"
+                  ref={filesHeading}
+                  tabIndex={-1}
+                  className="text-muted text-sm font-medium outline-none"
+                >
                   Files{state.files.length > 0 ? ` (${state.files.length})` : ''}
                 </h2>
                 <FileList files={state.files} onDeleted={removeFile} />

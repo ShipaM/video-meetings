@@ -1,7 +1,7 @@
 'use client';
 
 import { AlertDialog, Button, Chip, useOverlayState } from '@heroui/react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { clearAccessToken, getAccessToken } from '../../auth-storage';
 import { API_URL } from '../../constants';
 import { formatFileSize, formatMeetingDate, type MeetingFile } from '../../meetings';
@@ -87,11 +87,24 @@ function TrashIcon() {
   );
 }
 
+/** Calls `onUnmount` when the dialog content leaves the DOM, i.e. after its exit animation. */
+function UnmountListener({ onUnmount }: { onUnmount: () => void }) {
+  const callback = useRef(onUnmount);
+  useEffect(() => {
+    callback.current = onUnmount;
+  }, [onUnmount]);
+  useEffect(() => () => callback.current(), []);
+  return null;
+}
+
 /** Delete button with a confirmation dialog; the dialog stays open until the API has answered. */
 function DeleteFileButton({ file, onDeleted }: { file: MeetingFile; onDeleted: () => void }) {
   const dialog = useOverlayState();
   const [isPending, setIsPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The row (and this button) goes only once the dialog has closed: the dialog returns focus to
+  // this button first, so the page can then move it to the file section instead of losing it.
+  const isDeleted = useRef(false);
 
   function handleOpenChange(isOpen: boolean) {
     if (isPending) return;
@@ -105,8 +118,8 @@ function DeleteFileButton({ file, onDeleted }: { file: MeetingFile; onDeleted: (
     const result = await deleteFile(file);
     setIsPending(false);
     if (result.type === 'deleted') {
+      isDeleted.current = true;
       dialog.close();
-      onDeleted();
     } else if (result.type === 'unauthorized') {
       clearAccessToken(); // expired token: back to the login page
     } else {
@@ -125,9 +138,14 @@ function DeleteFileButton({ file, onDeleted }: { file: MeetingFile; onDeleted: (
       >
         <TrashIcon />
       </Button>
-      <AlertDialog.Backdrop isOpen={dialog.isOpen} onOpenChange={handleOpenChange}>
+      <AlertDialog.Backdrop
+        isOpen={dialog.isOpen}
+        onOpenChange={handleOpenChange}
+        isKeyboardDismissDisabled={false}
+      >
         <AlertDialog.Container>
-          <AlertDialog.Dialog className="sm:max-w-[420px]">
+          <AlertDialog.Dialog className="sm:max-w-105">
+            <UnmountListener onUnmount={() => isDeleted.current && onDeleted()} />
             <AlertDialog.Header>
               <AlertDialog.Icon status="danger" />
               <AlertDialog.Heading>Delete this file?</AlertDialog.Heading>

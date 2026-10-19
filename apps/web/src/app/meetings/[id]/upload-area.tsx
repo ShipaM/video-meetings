@@ -31,7 +31,7 @@ function UploadRow({ item, onRetry, onCancel }: UploadRowProps) {
   const hasError = item.status === 'rejected' || item.status === 'failed';
   const isActive = item.status === 'queued' || item.status === 'uploading';
   // A failed upload that can resume keeps its bar, so the owner sees where it stopped.
-  const showProgress = !hasError || item.canRetry;
+  const showProgress = !hasError || (item.canRetry && item.progress > 0);
   const progressColor = hasError ? 'danger' : item.status === 'done' ? 'success' : 'accent';
 
   return (
