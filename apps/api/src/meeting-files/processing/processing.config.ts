@@ -31,14 +31,12 @@ export function documentJobTimeoutMs(): number {
   return positiveNumber('DOCUMENT_PROCESSING_TIMEOUT_SECONDS', 15 * 60) * 1000;
 }
 
-/** How often a worker looks for new jobs. */
-export function jobsPollingIntervalSeconds(): number {
-  return positiveNumber('JOBS_POLLING_INTERVAL_SECONDS', 2);
-}
-
-/** PostgreSQL schema of the pg-boss tables; Prisma only manages `public`. */
-export function jobsSchema(): string {
-  return process.env.PGBOSS_SCHEMA || 'pgboss';
+/**
+ * A file `PROCESSING` without any change for this long has lost its job: every attempt pg-boss
+ * makes (the first and two retries) has timed out, with room for the retry delays.
+ */
+export function stuckProcessingMs(): number {
+  return 3 * documentJobTimeoutMs() + 60 * 60 * 1000;
 }
 
 export interface OllamaSettings {
@@ -63,5 +61,11 @@ export function ollamaSettings(): OllamaSettings {
 /** Extracted text beyond this many characters is cut (zip bombs, huge documents). */
 export const MAX_EXTRACTED_CHARS = 2_000_000;
 
-/** Reason stored on a file whose processing failed for an unexpected reason. */
-export const PROCESSING_FAILED_REASON = 'Processing failed';
+/** Failure reasons stored on a file (shown to users). */
+export const FAILURE_REASONS = {
+  summary: 'Summary could not be generated',
+  timeout: 'Processing took too long',
+  notStarted: 'Processing could not be started',
+  interrupted: 'Processing was interrupted',
+  unexpected: 'Processing failed',
+} as const;

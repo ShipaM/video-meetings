@@ -1,11 +1,13 @@
 import { Module, OnModuleInit } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module.js';
-import { AbandonedUploadsScheduler } from './abandoned-uploads.scheduler.js';
 import { CommandHandlers } from './commands/index.js';
 import { FilesStorageService } from './files-storage.service.js';
 import { fileLinkSecret } from './meeting-files.config.js';
 import { MeetingFilesController } from './meeting-files.controller.js';
+import { ProcessingQueue } from './processing/processing-queue.js';
+import { SummarizerProvider } from './processing/summarizer.provider.js';
 import { QueryHandlers } from './queries/index.js';
+import { StorageMaintenanceWorker } from './storage-maintenance.worker.js';
 import { TusService } from './tus.service.js';
 import { UploadsController } from './uploads.controller.js';
 
@@ -15,7 +17,9 @@ import { UploadsController } from './uploads.controller.js';
   providers: [
     FilesStorageService,
     TusService,
-    AbandonedUploadsScheduler,
+    SummarizerProvider,
+    ProcessingQueue,
+    StorageMaintenanceWorker,
     ...CommandHandlers,
     ...QueryHandlers,
   ],
