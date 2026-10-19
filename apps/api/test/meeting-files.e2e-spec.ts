@@ -300,7 +300,9 @@ describe('Meeting files (e2e)', () => {
       const file = (await listFiles(ownerToken, meetingId)).find(
         (item) => item.id === fileIdOf(location),
       );
-      expect(file).toMatchObject({ mimeType: 'text/plain', kind: 'DOCUMENT', status: 'READY' });
+      expect(file).toMatchObject({ mimeType: 'text/plain', kind: 'DOCUMENT' });
+      // A document is summarized in the background (meeting-file-processing.e2e-spec.ts).
+      expect(['PROCESSING', 'READY']).toContain(file?.status);
     });
 
     it('rejects a disallowed file type (400)', async () => {
