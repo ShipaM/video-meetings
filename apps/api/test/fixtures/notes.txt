@@ -1,0 +1,3 @@
+Quarterly planning meeting.
+The team agreed to ship the upload feature in October.
+Action item: Anna prepares the release notes.

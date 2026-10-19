@@ -81,7 +81,16 @@ model MeetingFile {
   createdAt         DateTime          @default(now())
   completedAt       DateTime?
   updatedAt         DateTime          @updatedAt
+  summary           MeetingFileSummary?
 
   @@index([meetingId, status])
   @@index([status, lastChunkAt])
+}
+
+// The summary a processing job produced for a file; goes with the file.
+model MeetingFileSummary {
+  fileId    String      @id
+  file      MeetingFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  text      String
+  createdAt DateTime    @default(now())
 }
