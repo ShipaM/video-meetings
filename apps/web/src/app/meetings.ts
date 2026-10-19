@@ -1,10 +1,22 @@
 import { FILE_SIZE_UNITS } from './constants';
 
+/** The caller's relation to a meeting: `participant` means it was shared with them (read-only). */
+export type MeetingRole = 'owner' | 'participant';
+
 export type Meeting = {
   id: string;
   title: string;
   startsAt: string;
+  ownerId: string;
+  role: MeetingRole;
   createdAt: string;
+};
+
+/** A participant as returned by `GET /meetings/:id/participants`. */
+export type Participant = {
+  userId: string;
+  email: string;
+  addedAt: string;
 };
 
 export type MeetingFileStatus = 'UPLOADING' | 'PROCESSING' | 'READY' | 'FAILED';
