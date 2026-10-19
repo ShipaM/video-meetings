@@ -1,7 +1,5 @@
-import { readFile } from 'node:fs/promises';
-import mammoth from 'mammoth';
-import { OfficeParser } from 'officeparser';
-import { extractText, getDocumentProxy } from 'unpdf';
+import { stat } from 'node:fs/promises';
+import { Worker } from 'node:worker_threads';
 import { MAX_EXTRACTED_CHARS } from './processing.config.js';
 
 /** Why a document has no usable text; `reason` is shown to the user as the failure reason. */
@@ -19,57 +17,85 @@ export class DocumentTextError extends Error {
 export const NO_TEXT_REASON = 'No text found in the document';
 export const UNREADABLE_REASON = 'The document could not be read';
 
-async function pdfText(filePath: string): Promise<string> {
-  const pdf = await getDocumentProxy(new Uint8Array(await readFile(filePath)));
-  return (await extractText(pdf, { mergePages: true })).text;
-}
+/**
+ * PDF, DOCX and PPTX are parsed whole, so larger ones are not summarized; plain text is read only
+ * up to the character cap and has no size limit.
+ */
+export const MAX_PARSED_DOCUMENT_BYTES = 100 * 1024 ** 2;
+export const TOO_LARGE_REASON = 'The document is too large to summarize (over 100 MB)';
 
-async function docxText(filePath: string): Promise<string> {
-  return (await mammoth.extractRawText({ path: filePath })).value;
-}
+/** Heap of the extraction worker: a document that needs more fails instead of the API. */
+const WORKER_HEAP_MB = 1024;
 
-async function pptxText(filePath: string): Promise<string> {
-  // A buffer, not the path: stored files have no extension, which officeparser would go by.
-  const ast = await OfficeParser.parseOffice(await readFile(filePath), {
-    ocr: false,
-    extractAttachments: false,
+const WORKER_URL = new URL('./extract-text.worker.mjs', import.meta.url);
+
+const EXTRACTABLE = new Set([
+  'text/plain',
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+]);
+
+/** Runs the extraction worker; `signal` terminates it (no parse keeps running after a timeout). */
+function runWorker(filePath: string, mimeType: string, signal: AbortSignal): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(WORKER_URL, {
+      workerData: { filePath, mimeType, maxChars: MAX_EXTRACTED_CHARS },
+      resourceLimits: { maxOldGenerationSizeMb: WORKER_HEAP_MB },
+    });
+    let settled = false;
+    const settle = (finish: () => void) => {
+      if (!settled) {
+        settled = true;
+        signal.removeEventListener('abort', onAbort);
+        finish();
+      }
+    };
+    const onAbort = () => {
+      settle(() => reject(signal.reason as Error));
+      void worker.terminate();
+    };
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+    signal.addEventListener('abort', onAbort, { once: true });
+    worker.once('message', (text: string) => settle(() => resolve(text)));
+    worker.once('error', (error) =>
+      settle(() => reject(new DocumentTextError(UNREADABLE_REASON, { cause: error }))),
+    );
+    worker.once('exit', (code) =>
+      settle(() => reject(new DocumentTextError(UNREADABLE_REASON, { cause: `exit ${code}` }))),
+    );
   });
-  return (await ast.to('text')).value;
 }
-
-async function plainText(filePath: string): Promise<string> {
-  // Upload completion already checked a sample; the whole file must be valid UTF-8 too.
-  return new TextDecoder('utf-8', { fatal: true }).decode(await readFile(filePath));
-}
-
-/** Extractors by the verified (stored) MIME type of a document. */
-const EXTRACTORS: Record<string, (filePath: string) => Promise<string>> = {
-  'application/pdf': pdfText,
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': docxText,
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation': pptxText,
-  'text/plain': plainText,
-};
-
-export const isExtractable = (mimeType: string): boolean => mimeType in EXTRACTORS;
 
 /**
- * The plain text of a stored document, trimmed and capped at `MAX_EXTRACTED_CHARS`. Rejects with
- * `DocumentTextError` for a file that cannot be read or holds no text (a scanned PDF: no OCR).
+ * The plain text of a stored document, trimmed and capped at `MAX_EXTRACTED_CHARS`, extracted in
+ * a worker thread. Rejects with `DocumentTextError` for a file that cannot be read, is too large
+ * or holds no text (a scanned PDF: no OCR), and with the signal's reason once `signal` is aborted.
  */
-export async function extractDocumentText(filePath: string, mimeType: string): Promise<string> {
-  const extract = EXTRACTORS[mimeType];
-  if (!extract) {
+export async function extractDocumentText(
+  filePath: string,
+  mimeType: string,
+  signal: AbortSignal,
+): Promise<string> {
+  if (!EXTRACTABLE.has(mimeType)) {
     throw new DocumentTextError(UNREADABLE_REASON);
   }
-  let text: string;
+  let size: number;
   try {
-    text = await extract(filePath);
+    ({ size } = await stat(filePath));
   } catch (error) {
     throw new DocumentTextError(UNREADABLE_REASON, { cause: error });
   }
-  const trimmed = text.trim();
-  if (!trimmed) {
+  if (mimeType !== 'text/plain' && size > MAX_PARSED_DOCUMENT_BYTES) {
+    throw new DocumentTextError(TOO_LARGE_REASON);
+  }
+
+  const text = await runWorker(filePath, mimeType, signal);
+  if (!text) {
     throw new DocumentTextError(NO_TEXT_REASON);
   }
-  return trimmed.slice(0, MAX_EXTRACTED_CHARS);
+  return text;
 }

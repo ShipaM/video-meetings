@@ -2,7 +2,6 @@ import { Logger } from '@nestjs/common';
 import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { PrismaService } from '../../../prisma/prisma.service.js';
 import { FilesStorageService } from '../../files-storage.service.js';
-import { abortable } from '../../processing/abortable.js';
 import { DocumentTextError, extractDocumentText } from '../../processing/document-text.js';
 import { FAILURE_REASONS, documentJobTimeoutMs } from '../../processing/processing.config.js';
 import { Summarizer, SummaryError } from '../../processing/summarizer.js';
@@ -29,8 +28,9 @@ export class ProcessDocumentHandler implements ICommandHandler<ProcessDocumentCo
     const timeout = AbortSignal.timeout(documentJobTimeoutMs());
     const jobSignal = AbortSignal.any([signal, timeout]);
     try {
-      const text = await abortable(
-        extractDocumentText(this.storage.pathOf(file.storageKey), file.mimeType),
+      const text = await extractDocumentText(
+        this.storage.pathOf(file.storageKey),
+        file.mimeType,
         jobSignal,
       );
       const summary = await this.summarizer.summarize(text, jobSignal);
