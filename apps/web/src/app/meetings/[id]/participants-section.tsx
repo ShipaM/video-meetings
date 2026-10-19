@@ -36,6 +36,19 @@ function getEmailError(value: string): string | null {
   return null;
 }
 
+/** An e-mail that, when it must wrap, wraps after the `@` before breaking inside a part. */
+function EmailText({ email }: { email: string }) {
+  const at = email.lastIndexOf('@');
+  if (at <= 0) return email;
+  return (
+    <>
+      {email.slice(0, at + 1)}
+      <wbr />
+      {email.slice(at + 1)}
+    </>
+  );
+}
+
 function RemoveIcon() {
   return (
     <svg
@@ -127,9 +140,11 @@ function RemoveParticipantButton({
             </AlertDialog.Header>
             <AlertDialog.Body className="flex flex-col gap-3">
               <p>
-                <strong className="break-all">{participant.email}</strong> will lose access to the
-                meeting and its files at once, download links included. You can add them again
-                later.
+                <strong className="wrap-anywhere">
+                  <EmailText email={participant.email} />
+                </strong>{' '}
+                will lose access to the meeting and its files at once, download links included. You
+                can add them again later.
               </p>
               {error !== null && (
                 <p role="alert" className="text-danger text-sm">
@@ -318,7 +333,9 @@ export function ParticipantsSection({ meetingId }: { meetingId: string }) {
               className="border-default flex items-center gap-3 rounded-2xl border px-4 py-3"
             >
               <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <span className="font-medium break-all">{participant.email}</span>
+                <span className="font-medium wrap-anywhere">
+                  <EmailText email={participant.email} />
+                </span>
                 <span className="text-muted text-sm">
                   Added{' '}
                   <time dateTime={participant.addedAt}>
