@@ -6,17 +6,15 @@ import { CancelUploadCommand } from '../cancel-upload.command.js';
 import { CancelUploadHandler } from './cancel-upload.handler.js';
 
 describe('CancelUploadHandler', () => {
-  const findFirst = vi.fn();
   const findUnique = vi.fn();
   const deleteMany = vi.fn();
   const execute = vi.fn();
   const handler = new CancelUploadHandler(
-    { meetingFile: { findFirst, findUnique, deleteMany } } as unknown as PrismaService,
+    { meetingFile: { findUnique, deleteMany } } as unknown as PrismaService,
     { execute } as unknown as QueryBus,
   );
 
   beforeEach(() => {
-    findFirst.mockReset();
     findUnique.mockReset();
     deleteMany.mockReset();
     execute.mockReset();
@@ -30,29 +28,28 @@ describe('CancelUploadHandler', () => {
     expect(deleteMany).toHaveBeenCalledWith({
       where: { id: 'f1', uploadedById: 'u1', status: 'UPLOADING' },
     });
-    expect(findFirst).not.toHaveBeenCalled();
+    expect(findUnique).not.toHaveBeenCalled();
   });
 
   it("hides another user's upload from a stranger (404)", async () => {
     deleteMany.mockResolvedValue({ count: 0 });
-    findFirst.mockResolvedValue(null);
-    findUnique.mockResolvedValue({ meetingId: 'm1' });
+    findUnique.mockResolvedValue({ meetingId: 'm1', uploadedById: 'u1' });
     execute.mockRejectedValue(new NotFoundException());
 
     await expect(handler.execute(new CancelUploadCommand('u2', 'f1'))).rejects.toThrow(
       NotFoundException,
     );
-    expect(findFirst).toHaveBeenCalledWith({
-      where: { id: 'f1', uploadedById: 'u2' },
-      select: { id: true },
+    expect(findUnique).toHaveBeenCalledTimes(1);
+    expect(findUnique).toHaveBeenCalledWith({
+      where: { id: 'f1' },
+      select: { uploadedById: true, meetingId: true },
     });
     expect(execute).toHaveBeenCalledWith(new GetMeetingQuery('u2', 'm1', 'manage'));
   });
 
   it("forbids a participant to cancel the owner's upload (403)", async () => {
     deleteMany.mockResolvedValue({ count: 0 });
-    findFirst.mockResolvedValue(null);
-    findUnique.mockResolvedValue({ meetingId: 'm1' });
+    findUnique.mockResolvedValue({ meetingId: 'm1', uploadedById: 'u1' });
     execute.mockRejectedValue(new ForbiddenException());
 
     await expect(handler.execute(new CancelUploadCommand('u3', 'f1'))).rejects.toThrow(
@@ -60,9 +57,19 @@ describe('CancelUploadHandler', () => {
     );
   });
 
+  it('answers 404 for a missing upload', async () => {
+    deleteMany.mockResolvedValue({ count: 0 });
+    findUnique.mockResolvedValue(null);
+
+    await expect(handler.execute(new CancelUploadCommand('u1', 'f1'))).rejects.toThrow(
+      NotFoundException,
+    );
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it('refuses to cancel a completed upload (409), so tus keeps its data', async () => {
     deleteMany.mockResolvedValue({ count: 0 });
-    findFirst.mockResolvedValue({ id: 'f1' });
+    findUnique.mockResolvedValue({ meetingId: 'm1', uploadedById: 'u1' });
 
     await expect(handler.execute(new CancelUploadCommand('u1', 'f1'))).rejects.toThrow(
       ConflictException,

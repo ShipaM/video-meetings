@@ -3,7 +3,7 @@ import { CommandBus, CommandHandler, ICommandHandler, QueryBus } from '@nestjs/c
 import type { MeetingFile } from '../../../generated/prisma/client.js';
 import { PrismaService } from '../../../prisma/prisma.service.js';
 import { FilesStorageService } from '../../files-storage.service.js';
-import { rejectForeignUpload } from '../../upload-access.js';
+import { requireOwnUpload } from '../../upload-access.js';
 import { AuthorizeUploadRequestCommand } from '../authorize-upload-request.command.js';
 import { CompleteUploadCommand } from '../complete-upload.command.js';
 
@@ -17,13 +17,11 @@ export class AuthorizeUploadRequestHandler implements ICommandHandler<AuthorizeU
   ) {}
 
   async execute({ userId, fileId, method }: AuthorizeUploadRequestCommand): Promise<MeetingFile> {
-    // Only the uploader may continue an upload.
-    const file = await this.prisma.meetingFile.findFirst({
-      where: { id: fileId, uploadedById: userId },
-    });
-    if (!file) {
-      return rejectForeignUpload(this.prisma, this.queryBus, userId, fileId);
-    }
+    const file = await requireOwnUpload(
+      this.queryBus,
+      userId,
+      await this.prisma.meetingFile.findUnique({ where: { id: fileId } }),
+    );
     if (file.status !== 'UPLOADING') {
       // HEAD of a finished upload is fine (the client learns it is done); writing is not.
       if (method === 'PATCH') {

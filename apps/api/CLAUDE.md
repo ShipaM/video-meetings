@@ -83,14 +83,14 @@ A global `ValidationPipe` (`whitelist: true`) is registered in `src/main.ts` and
 
 `UsersModule` owns the `User` table; no other module touches `prisma.user`. It has no controller, it is reached only through CQRS messages, which are exported from `src/users/index.ts` (the module's public API):
 
-| Message                          | Result                                                                                    |
-| -------------------------------- | ----------------------------------------------------------------------------------------- |
-| `CreateUserCommand(email, hash)` | the stored `UserRecord`; lower-cases the e-mail, `409 ConflictException` when it is taken |
-| `FindUserByEmailQuery(email)`    | `UserRecord` or `null`; the lookup is case-insensitive (the e-mail is lower-cased)        |
-| `FindUserByIdQuery(id)`          | `UserRecord` or `null`                                                                    |
-| `FindUsersByIdsQuery(ids)`       | `UserRecord[]` (unknown ids are left out); one query, used for participant e-mails        |
+| Message                          | Result                                                                                         |
+| -------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `CreateUserCommand(email, hash)` | the stored `UserRecord`; lower-cases the e-mail, `409 ConflictException` when it is taken      |
+| `FindUserByEmailQuery(email)`    | `UserRecord` or `null`; the lookup is case-insensitive (the e-mail is lower-cased)             |
+| `FindUserByIdQuery(id)`          | `UserRecord` or `null`                                                                         |
+| `FindUsersByIdsQuery(ids)`       | `UserContact[]` (`id`, `email`, no hash; unknown ids left out); one query, participant e-mails |
 
-`UserRecord` (`id`, `email`, `passwordHash`) is internal: never return it from a controller. Profile and other user features go into this module.
+`UserRecord` (`id`, `email`, `passwordHash`) is internal: never return it from a controller. Queries that serve other users' data return `UserContact` (`id`, `email`) instead, so the hash is never even loaded. Profile and other user features go into this module.
 
 Auth does the credential work and talks to Users over the buses: `RegisterUserHandler` hashes the password with bcrypt and dispatches `CreateUserCommand`; `LoginHandler` dispatches `FindUserByEmailQuery`, compares the hash and issues the JWT through `TokenService`. Auth never imports Prisma.
 
@@ -126,7 +126,7 @@ Every access check goes through `GetMeetingQuery(userId, meetingId, access = 'vi
 | participant  | allowed                                                               | `403`                                                 |
 | anybody else | `404` (a foreign meeting looks like a missing one)                    | `404`                                                 |
 
-tus requests on an existing upload (`HEAD`, `PATCH`, `DELETE /uploads/:id`) look the upload up by its uploader; for anyone else `rejectForeignUpload` (`src/meeting-files/upload-access.ts`) asks `GetMeetingQuery(..., 'manage')`, so a participant gets `403` and a stranger or a missing upload `404`. Participants never see `UPLOADING` files: the files list and download links skip them for everybody.
+tus requests on an existing upload (`HEAD`, `PATCH`, `DELETE /uploads/:id`) read the upload once by id and pass it to `requireOwnUpload` (`src/meeting-files/upload-access.ts`): the uploader goes on, anyone else is decided by `GetMeetingQuery(..., 'manage')`, so a participant gets `403` and a stranger or a missing upload `404`. Participants never see `UPLOADING` files: the files list and download links skip them for everybody.
 
 ## Meeting files
 

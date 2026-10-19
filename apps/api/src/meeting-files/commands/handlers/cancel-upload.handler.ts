@@ -1,7 +1,7 @@
 import { ConflictException } from '@nestjs/common';
 import { CommandHandler, ICommandHandler, QueryBus } from '@nestjs/cqrs';
 import { PrismaService } from '../../../prisma/prisma.service.js';
-import { rejectForeignUpload } from '../../upload-access.js';
+import { requireOwnUpload } from '../../upload-access.js';
 import { CancelUploadCommand } from '../cancel-upload.command.js';
 
 /**
@@ -26,14 +26,13 @@ export class CancelUploadHandler implements ICommandHandler<CancelUploadCommand>
       return;
     }
 
-    // Nothing deleted: tell a completed upload from one that is not the caller's.
-    const file = await this.prisma.meetingFile.findFirst({
-      where: { id: fileId, uploadedById: userId },
-      select: { id: true },
+    // Nothing deleted: tell a completed upload from one that is not the caller's (a single read,
+    // so the answer cannot mix two states of the row).
+    const file = await this.prisma.meetingFile.findUnique({
+      where: { id: fileId },
+      select: { uploadedById: true, meetingId: true },
     });
-    if (!file) {
-      return rejectForeignUpload(this.prisma, this.queryBus, userId, fileId);
-    }
+    await requireOwnUpload(this.queryBus, userId, file);
     throw new ConflictException('Upload is already complete; delete the file instead');
   }
 }

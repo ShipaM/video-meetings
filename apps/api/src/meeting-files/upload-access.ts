@@ -1,22 +1,21 @@
 import { NotFoundException } from '@nestjs/common';
 import type { QueryBus } from '@nestjs/cqrs';
+import type { MeetingFile } from '../generated/prisma/client.js';
 import { GetMeetingQuery } from '../meetings/index.js';
-import type { PrismaService } from '../prisma/prisma.service.js';
 
 /**
- * Called when `fileId` is not an upload of `userId`. A participant of its meeting may know the
- * meeting but not write to it (`403`); everybody else cannot tell the upload exists (`404`).
+ * Only the uploader may continue or cancel an upload. For anyone else the meeting rules decide
+ * from the row already read (no second lookup): a participant gets `403`, everybody else `404`,
+ * as for a missing upload. Resolves to the file for its uploader.
  */
-export async function rejectForeignUpload(
-  prisma: PrismaService,
+export async function requireOwnUpload<T extends Pick<MeetingFile, 'uploadedById' | 'meetingId'>>(
   queryBus: QueryBus,
   userId: string,
-  fileId: string,
-): Promise<never> {
-  const file = await prisma.meetingFile.findUnique({
-    where: { id: fileId },
-    select: { meetingId: true },
-  });
+  file: T | null,
+): Promise<T> {
+  if (file?.uploadedById === userId) {
+    return file;
+  }
   if (file) {
     // Throws 404 for a stranger and 403 for a participant.
     await queryBus.execute(new GetMeetingQuery(userId, file.meetingId, 'manage'));

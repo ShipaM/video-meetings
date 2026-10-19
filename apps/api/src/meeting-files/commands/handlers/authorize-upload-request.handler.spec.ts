@@ -8,23 +8,28 @@ import { CompleteUploadCommand } from '../complete-upload.command.js';
 import { AuthorizeUploadRequestHandler } from './authorize-upload-request.handler.js';
 
 describe('AuthorizeUploadRequestHandler', () => {
-  const findFirst = vi.fn();
   const findUnique = vi.fn();
   const updateMany = vi.fn();
   const execute = vi.fn();
   const query = vi.fn();
   const getUpload = vi.fn();
   const handler = new AuthorizeUploadRequestHandler(
-    { meetingFile: { findFirst, findUnique, updateMany } } as unknown as PrismaService,
+    { meetingFile: { findUnique, updateMany } } as unknown as PrismaService,
     { execute } as unknown as CommandBus,
     { execute: query } as unknown as QueryBus,
     { store: { getUpload } } as unknown as FilesStorageService,
   );
 
-  const uploading = { id: 'f1', storageKey: 'f1', status: 'UPLOADING', size: 100n };
+  const uploading = {
+    id: 'f1',
+    meetingId: 'm1',
+    uploadedById: 'u1',
+    storageKey: 'f1',
+    status: 'UPLOADING',
+    size: 100n,
+  };
 
   beforeEach(() => {
-    findFirst.mockReset();
     findUnique.mockReset();
     updateMany.mockReset();
     execute.mockReset();
@@ -32,21 +37,20 @@ describe('AuthorizeUploadRequestHandler', () => {
     getUpload.mockReset();
   });
 
-  it("hides another user's upload from a stranger (404)", async () => {
-    findFirst.mockResolvedValue(null);
-    findUnique.mockResolvedValue({ meetingId: 'm1' });
+  it("hides another user's upload from a stranger (404) with a single read", async () => {
+    findUnique.mockResolvedValue(uploading);
     query.mockRejectedValue(new NotFoundException());
 
     await expect(
       handler.execute(new AuthorizeUploadRequestCommand('u2', 'f1', 'HEAD')),
     ).rejects.toThrow(NotFoundException);
-    expect(findFirst).toHaveBeenCalledWith({ where: { id: 'f1', uploadedById: 'u2' } });
+    expect(findUnique).toHaveBeenCalledTimes(1);
+    expect(findUnique).toHaveBeenCalledWith({ where: { id: 'f1' } });
     expect(query).toHaveBeenCalledWith(new GetMeetingQuery('u2', 'm1', 'manage'));
   });
 
   it("forbids a participant to touch the owner's upload (403)", async () => {
-    findFirst.mockResolvedValue(null);
-    findUnique.mockResolvedValue({ meetingId: 'm1' });
+    findUnique.mockResolvedValue(uploading);
     query.mockRejectedValue(new ForbiddenException());
 
     await expect(
@@ -55,8 +59,16 @@ describe('AuthorizeUploadRequestHandler', () => {
     expect(updateMany).not.toHaveBeenCalled();
   });
 
+  it('answers 404 to the meeting owner for an upload of somebody else', async () => {
+    findUnique.mockResolvedValue(uploading);
+    query.mockResolvedValue({ id: 'm1', role: 'owner' });
+
+    await expect(
+      handler.execute(new AuthorizeUploadRequestCommand('u4', 'f1', 'HEAD')),
+    ).rejects.toThrow(NotFoundException);
+  });
+
   it('answers 404 for a missing upload without checking any meeting', async () => {
-    findFirst.mockResolvedValue(null);
     findUnique.mockResolvedValue(null);
 
     await expect(
@@ -65,8 +77,17 @@ describe('AuthorizeUploadRequestHandler', () => {
     expect(query).not.toHaveBeenCalled();
   });
 
+  it('does not check the meeting for the uploader', async () => {
+    findUnique.mockResolvedValue(uploading);
+    getUpload.mockResolvedValue({ offset: 40 });
+
+    await handler.execute(new AuthorizeUploadRequestCommand('u1', 'f1', 'HEAD'));
+
+    expect(query).not.toHaveBeenCalled();
+  });
+
   it('records chunk activity on PATCH', async () => {
-    findFirst.mockResolvedValue(uploading);
+    findUnique.mockResolvedValue(uploading);
     getUpload.mockResolvedValue({ offset: 40 });
     updateMany.mockResolvedValue({ count: 1 });
 
@@ -80,7 +101,7 @@ describe('AuthorizeUploadRequestHandler', () => {
   });
 
   it('answers 404 on PATCH when the upload was cancelled or cleaned up meanwhile', async () => {
-    findFirst.mockResolvedValue(uploading);
+    findUnique.mockResolvedValue(uploading);
     getUpload.mockResolvedValue({ offset: 40 });
     updateMany.mockResolvedValue({ count: 0 });
 
@@ -90,7 +111,7 @@ describe('AuthorizeUploadRequestHandler', () => {
   });
 
   it('does not write anything on HEAD of an upload in progress', async () => {
-    findFirst.mockResolvedValue(uploading);
+    findUnique.mockResolvedValue(uploading);
     getUpload.mockResolvedValue({ offset: 40 });
 
     await handler.execute(new AuthorizeUploadRequestCommand('u1', 'f1', 'HEAD'));
@@ -100,7 +121,7 @@ describe('AuthorizeUploadRequestHandler', () => {
   });
 
   it('completes an upload whose bytes are all stored but whose completion failed', async () => {
-    findFirst.mockResolvedValue(uploading);
+    findUnique.mockResolvedValue(uploading);
     getUpload.mockResolvedValue({ offset: 100 });
 
     await handler.execute(new AuthorizeUploadRequestCommand('u1', 'f1', 'HEAD'));
@@ -111,7 +132,7 @@ describe('AuthorizeUploadRequestHandler', () => {
   });
 
   it('allows HEAD but rejects PATCH (409) once the upload is complete', async () => {
-    findFirst.mockResolvedValue({ ...uploading, status: 'READY' });
+    findUnique.mockResolvedValue({ ...uploading, status: 'READY' });
 
     await expect(
       handler.execute(new AuthorizeUploadRequestCommand('u1', 'f1', 'HEAD')),
