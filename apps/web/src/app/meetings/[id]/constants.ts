@@ -91,3 +91,23 @@ export const UPLOAD_STATUS_TEXT: Record<UploadItem['status'], string> = {
 
 /** Shown on an upload stopped because the session ended. */
 export const SESSION_EXPIRED_MESSAGE = 'Your session has expired. Sign in again to upload.';
+
+/** Messages of a failed upload, by the API's answer (`network` when there was none). */
+export const UPLOAD_ERROR_MESSAGES = {
+  400: 'The server rejected this file: its type or content is not allowed.',
+  403: 'You are not allowed to upload files to this meeting.',
+  404: 'This meeting is no longer available.',
+  413: 'The file is larger than 2 GB.',
+  507: 'There is not enough storage space on the server.',
+  server: 'The server could not take the upload. Retry in a moment.',
+  network: 'The connection was interrupted. Check it and retry.',
+  offline: 'You are offline. Retry when the connection is back.',
+} as const;
+
+/** Messages of the file list actions. */
+export const FILE_GONE_MESSAGE = 'This file is no longer available.';
+export const DOWNLOAD_FAILED_MESSAGE = 'Could not start the download. Please try again.';
+export const DELETE_FAILED_MESSAGE = 'Could not delete the file. Please try again.';
+
+/** Longest wait for the delete dialog's exit animation before the deleted row is removed anyway. */
+export const DIALOG_CLOSE_FALLBACK_MS = 1000;

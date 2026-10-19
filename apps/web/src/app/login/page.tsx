@@ -15,7 +15,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { setAccessToken, useAccessToken } from '../auth-storage';
-import { API_URL, EMAIL_MAX_LENGTH, EMAIL_PATTERN } from '../constants';
+import { API_URL, EMAIL_MAX_LENGTH, EMAIL_PATTERN, SERVER_UNAVAILABLE_MESSAGE } from '../constants';
 import { PasswordField } from '../password-field';
 
 function getEmailError(value: string): string | null {
@@ -84,7 +84,7 @@ export default function LoginPage() {
       setAccessToken(accessToken);
       router.replace('/');
     } catch {
-      setError('The server is unavailable. Please try again later.');
+      setError(SERVER_UNAVAILABLE_MESSAGE);
     } finally {
       setIsPending(false);
     }

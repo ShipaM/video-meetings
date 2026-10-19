@@ -25,9 +25,37 @@ function UploadIcon() {
   );
 }
 
-type UploadRowProps = { item: UploadItem; onRetry: () => void; onCancel: () => void };
+type CancelUploadButtonProps = {
+  name: string;
+  className: string;
+  onCancel: () => void;
+  ref: (button: HTMLButtonElement | null) => void;
+};
 
-function UploadRow({ item, onRetry, onCancel }: UploadRowProps) {
+function CancelUploadButton({ name, className, onCancel, ref }: CancelUploadButtonProps) {
+  return (
+    <Button
+      ref={ref}
+      size="sm"
+      variant="tertiary"
+      className={className}
+      aria-label={`Cancel upload of ${name}`}
+      onPress={onCancel}
+    >
+      Cancel
+    </Button>
+  );
+}
+
+type UploadRowProps = {
+  item: UploadItem;
+  onRetry: () => void;
+  onCancel: () => void;
+  /** Receives the row's Cancel button (one at a time), so focus can move to it after Retry. */
+  cancelRef: (button: HTMLButtonElement | null) => void;
+};
+
+function UploadRow({ item, onRetry, onCancel, cancelRef }: UploadRowProps) {
   const hasError = item.status === 'rejected' || item.status === 'failed';
   const isActive = item.status === 'queued' || item.status === 'uploading';
   // A failed upload that can resume keeps its bar, so the owner sees where it stopped.
@@ -48,15 +76,12 @@ function UploadRow({ item, onRetry, onCancel }: UploadRowProps) {
           </span>
         </div>
         {isActive && (
-          <Button
-            size="sm"
-            variant="tertiary"
+          <CancelUploadButton
+            ref={cancelRef}
+            name={item.name}
             className="min-h-11 shrink-0 sm:min-h-9"
-            aria-label={`Cancel upload of ${item.name}`}
-            onPress={onCancel}
-          >
-            Cancel
-          </Button>
+            onCancel={onCancel}
+          />
         )}
         {hasError && !item.canRetry && (
           <CloseButton aria-label={`Dismiss ${item.name}`} onPress={onCancel} />
@@ -95,15 +120,12 @@ function UploadRow({ item, onRetry, onCancel }: UploadRowProps) {
           >
             Retry
           </Button>
-          <Button
-            size="sm"
-            variant="tertiary"
+          <CancelUploadButton
+            ref={cancelRef}
+            name={item.name}
             className="min-h-11 flex-1 sm:min-h-9 sm:flex-none"
-            aria-label={`Cancel upload of ${item.name}`}
-            onPress={onCancel}
-          >
-            Cancel
-          </Button>
+            onCancel={onCancel}
+          />
         </div>
       )}
     </li>
@@ -122,6 +144,31 @@ export function UploadArea({
   const [isDragging, setIsDragging] = useState(false);
   // dragenter/dragleave fire for every child; count them to know when the pointer really left.
   const dragDepth = useRef(0);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const cancelButtons = useRef(new Map<string, HTMLButtonElement>());
+
+  // Retry and Cancel remove the button that was pressed. If that left focus on the body, move it
+  // to what replaced the button: the row's Cancel after Retry, the section heading after Cancel.
+  function moveLostFocus(getTarget: () => HTMLElement | null | undefined) {
+    requestAnimationFrame(() => {
+      if (document.activeElement === document.body) getTarget()?.focus();
+    });
+  }
+
+  function handleRetry(key: string) {
+    retry(key);
+    moveLostFocus(() => cancelButtons.current.get(key));
+  }
+
+  function handleCancel(key: string) {
+    cancel(key);
+    moveLostFocus(() => headingRef.current);
+  }
+
+  function setCancelButton(key: string, button: HTMLButtonElement | null) {
+    if (button) cancelButtons.current.set(key, button);
+    else cancelButtons.current.delete(key);
+  }
 
   function handleDragEnter(event: React.DragEvent) {
     if (!event.dataTransfer.types.includes('Files')) return;
@@ -155,7 +202,12 @@ export function UploadArea({
 
   return (
     <section aria-labelledby="upload-heading" className="flex flex-col gap-3">
-      <h2 id="upload-heading" className="text-muted text-sm font-medium">
+      <h2
+        id="upload-heading"
+        ref={headingRef}
+        tabIndex={-1}
+        className="text-muted text-sm font-medium outline-none"
+      >
         Upload files
       </h2>
 
@@ -202,8 +254,9 @@ export function UploadArea({
           <UploadRow
             key={item.key}
             item={item}
-            onRetry={() => retry(item.key)}
-            onCancel={() => cancel(item.key)}
+            onRetry={() => handleRetry(item.key)}
+            onCancel={() => handleCancel(item.key)}
+            cancelRef={(button) => setCancelButton(item.key, button)}
           />
         ))}
       </ul>

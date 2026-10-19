@@ -15,7 +15,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useRef, useState } from 'react';
 import { setAccessToken } from '../auth-storage';
-import { API_URL, EMAIL_MAX_LENGTH, EMAIL_PATTERN } from '../constants';
+import { API_URL, EMAIL_MAX_LENGTH, EMAIL_PATTERN, SERVER_UNAVAILABLE_MESSAGE } from '../constants';
 import { PasswordField } from '../password-field';
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from './constants';
 
@@ -93,7 +93,7 @@ export default function RegisterPage() {
       setStatus({ type: 'success' });
       router.replace('/');
     } catch {
-      setStatus({ type: 'error', message: 'The server is unavailable. Please try again later.' });
+      setStatus({ type: 'error', message: SERVER_UNAVAILABLE_MESSAGE });
     } finally {
       setIsPending(false);
     }

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { clearAccessToken, useAccessToken } from '../../auth-storage';
-import { API_URL } from '../../constants';
+import { API_URL, SERVER_UNAVAILABLE_MESSAGE } from '../../constants';
 import { formatMeetingDate, type Meeting, type MeetingFile } from '../../meetings';
 import { FileList } from './file-list';
 import { UploadArea } from './upload-area';
@@ -44,7 +44,7 @@ async function fetchMeeting(
     };
   } catch (error) {
     if (signal?.aborted) throw error;
-    return { type: 'error', message: 'The server is unavailable. Please try again later.' };
+    return { type: 'error', message: SERVER_UNAVAILABLE_MESSAGE };
   }
 }
 

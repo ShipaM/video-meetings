@@ -7,9 +7,11 @@ import {
   NOT_RETRYABLE_STATUSES,
   SESSION_EXPIRED_MESSAGE,
   UPLOAD_CHUNK_SIZE,
+  UPLOAD_ERROR_MESSAGES,
   UPLOAD_RETRY_DELAYS,
 } from './constants';
 import { getRejectionReason } from './file-types';
+import { deleteFile } from './files-api';
 
 export type UploadItem = {
   key: string;
@@ -24,39 +26,43 @@ export type UploadItem = {
   canRetry: boolean;
 };
 
+type UploadEntry = {
+  file: File;
+  upload: Upload;
+  /** URL of the upload on the server before this `Upload` has started (set on a retry). */
+  resumeUrl: string | null;
+};
+
 function getStatus(error: Error): number | undefined {
   return error instanceof DetailedError ? error.originalResponse?.getStatus() : undefined;
 }
 
+/** Statuses tus may retry by itself: no answer, server errors and offset conflicts / locks. */
+function isTransient(status: number): boolean {
+  return status === 0 || status >= 500 || status === 409 || status === 423;
+}
+
 /** Maps a failed tus request to a message for the user. */
 function getUploadError(error: Error): string {
-  switch (getStatus(error)) {
-    case 400:
-      return 'The server rejected this file: its type or content is not allowed.';
-    case 404:
-      return 'This meeting is no longer available.';
-    case 413:
-      return 'The file is larger than 2 GB.';
-    case 507:
-      return 'There is not enough storage space on the server.';
-    default:
-      return navigator.onLine
-        ? 'The upload was interrupted. Check your connection and retry.'
-        : 'You are offline. Retry when the connection is back.';
+  const status = getStatus(error);
+  if (status === 400 || status === 403 || status === 404 || status === 413 || status === 507) {
+    return UPLOAD_ERROR_MESSAGES[status];
   }
+  if (status !== undefined && status !== 0) return UPLOAD_ERROR_MESSAGES.server;
+  return navigator.onLine ? UPLOAD_ERROR_MESSAGES.network : UPLOAD_ERROR_MESSAGES.offline;
 }
 
 /**
  * Uploads files to a meeting through the API's resumable tus endpoint: checks each file against
- * the allow-list first, then runs at most `MAX_PARALLEL_UPLOADS` uploads at a time. A failed
- * upload keeps its `Upload`, so "Retry" resumes it without picking the file again; "Cancel"
- * terminates it on the server, which removes the partial data.
+ * the allow-list first, then runs at most `MAX_PARALLEL_UPLOADS` uploads at a time. "Retry" on a
+ * failed upload continues it from the server's offset without picking the file again; "Cancel"
+ * terminates it on the server, which removes the record and the partial data.
  * `onUploaded` refreshes the file list; a finished upload disappears once it resolves.
  */
 export function useFileUploads(meetingId: string, onUploaded: () => Promise<void>) {
   const [items, setItems] = useState<UploadItem[]>([]);
-  /** Every upload that is queued, running or failed; a cancelled or finished one is removed. */
-  const uploads = useRef(new Map<string, Upload>());
+  /** Uploads that are queued, running or may be retried; cancelled and finished ones are removed. */
+  const uploads = useRef(new Map<string, UploadEntry>());
   const queue = useRef<string[]>([]);
   const running = useRef(new Set<string>());
   const nextKey = useRef(0);
@@ -86,6 +92,7 @@ export function useFileUploads(meetingId: string, onUploaded: () => Promise<void
   const failQueued = useCallback(() => {
     const keys = new Set(queue.current);
     queue.current = [];
+    keys.forEach((key) => uploads.current.delete(key));
     setItems((current) =>
       current.map((item) =>
         keys.has(item.key)
@@ -95,10 +102,30 @@ export function useFileUploads(meetingId: string, onUploaded: () => Promise<void
     );
   }, []);
 
+  /**
+   * Terminates a cancelled upload on the server. `409` means its last chunk landed first, so it is
+   * a stored file by now: delete that file too (upload id = file id), then refresh the list, which
+   * shows the file only if that delete failed.
+   */
+  const terminate = useCallback(
+    (url: string, options: Upload['options']) => {
+      Upload.terminate(url, options).catch(async (error: Error) => {
+        // Other failures (e.g. offline) leave the data to the server's abandoned-upload cleanup.
+        if (getStatus(error) !== 409) return;
+        const fileId = url.slice(url.lastIndexOf('/') + 1);
+        await deleteFile(meetingId, fileId);
+        await onUploadedRef.current();
+      });
+    },
+    [meetingId],
+  );
+
   const createUpload = useCallback(
-    (key: string, file: File) => {
+    (key: string, file: File, uploadUrl: string | null) => {
       const upload: Upload = new Upload(file, {
         endpoint: `${API_URL}/uploads`,
+        // Set on a retry: a fresh `Upload` (with a full set of automatic retries) resumes it.
+        uploadUrl,
         chunkSize: UPLOAD_CHUNK_SIZE,
         retryDelays: UPLOAD_RETRY_DELAYS,
         // Resume only within this page session; after a reload the file is picked again.
@@ -108,26 +135,38 @@ export function useFileUploads(meetingId: string, onUploaded: () => Promise<void
         onBeforeRequest: (request) => {
           request.setHeader('Authorization', `Bearer ${getAccessToken() ?? ''}`);
         },
+        // Once cancelled, only the termination is retried, and never on `409` (stored by then).
+        onShouldRetry: (error) => {
+          const status = getStatus(error) ?? 0;
+          const isCancelled = !uploads.current.has(key);
+          if (isCancelled && (error.originalRequest?.getMethod() !== 'DELETE' || status === 409)) {
+            return false;
+          }
+          return isTransient(status) && navigator.onLine;
+        },
         metadata: { meetingId, filename: file.name, filetype: file.type },
         // Cancelled while the creation request was in flight: terminate now that the URL is known.
         onUploadUrlAvailable: () => {
-          if (!uploads.current.has(key)) void upload.abort(true).catch(() => {});
+          if (uploads.current.has(key) || !upload.url) return;
+          void upload.abort();
+          terminate(upload.url, upload.options);
+          finish(key);
         },
         onProgress: (sent, total) => {
           update(key, { progress: total > 0 ? sent / total : 0 });
         },
         onError: (error) => {
-          if (!uploads.current.has(key)) return; // cancelled
-          const status = getStatus(error);
-          if (status === 401) {
-            update(key, { status: 'failed', error: SESSION_EXPIRED_MESSAGE, canRetry: false });
-            clearAccessToken(); // expired token: back to the login page
-          } else {
-            const canRetry = status === undefined || !NOT_RETRYABLE_STATUSES.includes(status);
-            update(key, { status: 'failed', error: getUploadError(error), canRetry });
-            // The server has removed what it rejected, nothing is left to resume or terminate.
-            if (!canRetry) uploads.current.delete(key);
+          if (!uploads.current.has(key)) {
+            finish(key); // cancelled while it was being created
+            return;
           }
+          const status = getStatus(error);
+          const canRetry = status === undefined || !NOT_RETRYABLE_STATUSES.includes(status);
+          const message = status === 401 ? SESSION_EXPIRED_MESSAGE : getUploadError(error);
+          update(key, { status: 'failed', error: message, canRetry });
+          // Nothing left to resume: the server removed what it rejected, or the session ended.
+          if (!canRetry) uploads.current.delete(key);
+          if (status === 401) clearAccessToken(); // expired token: back to the login page
           finish(key);
         },
         onSuccess: () => {
@@ -143,7 +182,7 @@ export function useFileUploads(meetingId: string, onUploaded: () => Promise<void
       });
       return upload;
     },
-    [meetingId, update, removeItem, finish],
+    [meetingId, update, removeItem, finish, terminate],
   );
 
   const startNext = useCallback(() => {
@@ -154,12 +193,12 @@ export function useFileUploads(meetingId: string, onUploaded: () => Promise<void
     }
     while (running.current.size < MAX_PARALLEL_UPLOADS && queue.current.length > 0) {
       const key = queue.current.shift()!;
-      const upload = uploads.current.get(key);
-      if (!upload) continue;
+      const entry = uploads.current.get(key);
+      if (!entry) continue;
       running.current.add(key);
       update(key, { status: 'uploading', error: null });
-      // After a failure this resumes: tus asks the server for the stored offset (`HEAD`) first.
-      upload.start();
+      // On a retry tus asks the server for the stored offset (`HEAD`) and continues from there.
+      entry.upload.start();
     }
   }, [update, failQueued]);
 
@@ -172,7 +211,7 @@ export function useFileUploads(meetingId: string, onUploaded: () => Promise<void
     const current = uploads.current;
     const active = running.current;
     return () => {
-      active.forEach((key) => void current.get(key)?.abort());
+      active.forEach((key) => void current.get(key)?.upload.abort());
       current.clear();
       active.clear();
       queue.current = [];
@@ -195,7 +234,11 @@ export function useFileUploads(meetingId: string, onUploaded: () => Promise<void
           canRetry: false,
         });
         if (!reason) {
-          uploads.current.set(key, createUpload(key, file));
+          uploads.current.set(key, {
+            file,
+            upload: createUpload(key, file, null),
+            resumeUrl: null,
+          });
           queue.current.push(key);
         }
       }
@@ -209,14 +252,17 @@ export function useFileUploads(meetingId: string, onUploaded: () => Promise<void
   /** Queues a failed upload again; it continues from where the server stopped receiving it. */
   const retry = useCallback(
     (key: string) => {
-      if (!uploads.current.has(key) || running.current.has(key) || queue.current.includes(key)) {
-        return;
-      }
+      const entry = uploads.current.get(key);
+      if (!entry || running.current.has(key) || queue.current.includes(key)) return;
+      // The failed `Upload` has used up its automatic retries; a new one starts with all of them.
+      const resumeUrl = entry.upload.url ?? entry.resumeUrl;
+      const upload = createUpload(key, entry.file, resumeUrl);
+      uploads.current.set(key, { file: entry.file, upload, resumeUrl });
       update(key, { status: 'queued', error: null, canRetry: false });
       queue.current.push(key);
       startNext();
     },
-    [update, startNext],
+    [createUpload, update, startNext],
   );
 
   /**
@@ -227,20 +273,21 @@ export function useFileUploads(meetingId: string, onUploaded: () => Promise<void
     (key: string) => {
       removeItem(key);
       queue.current = queue.current.filter((queued) => queued !== key);
-      const upload = uploads.current.get(key);
-      if (!upload) return;
+      const entry = uploads.current.get(key);
+      if (!entry) return;
       uploads.current.delete(key);
-      // Without a URL the creation request may still be running; `onUploadUrlAvailable` ends it.
-      if (upload.url) {
-        void upload.abort(true).catch((error: Error) => {
-          // 409: the last chunk landed first, so it is a stored file now (delete it from the list).
-          if (getStatus(error) === 409) void onUploadedRef.current();
-          // Otherwise (e.g. offline) the server's abandoned-upload cleanup removes the data.
-        });
-      }
+
+      const { upload } = entry;
+      const url = upload.url ?? entry.resumeUrl;
+      const isRunning = running.current.has(key);
+      // Being created: aborting could leave a record on the server, so the slot stays taken
+      // until the creation answers; `onUploadUrlAvailable` then terminates it, `onError` frees it.
+      if (isRunning && !url) return;
+      if (isRunning) void upload.abort();
+      if (url) terminate(url, upload.options);
       finish(key);
     },
-    [removeItem, finish],
+    [removeItem, terminate, finish],
   );
 
   return { items, addFiles, retry, cancel };

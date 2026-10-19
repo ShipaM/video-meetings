@@ -16,7 +16,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { clearAccessToken, useAccessToken } from '../../auth-storage';
-import { API_URL, MEETING_TITLE_MAX_LENGTH } from '../../constants';
+import { API_URL, MEETING_TITLE_MAX_LENGTH, SERVER_UNAVAILABLE_MESSAGE } from '../../constants';
 
 function getTitleError(value: string): string | null {
   return value.trim() ? null : 'Enter a meeting title';
@@ -80,7 +80,7 @@ export default function NewMeetingPage() {
       }
       router.replace('/');
     } catch {
-      setError('The server is unavailable. Please try again later.');
+      setError(SERVER_UNAVAILABLE_MESSAGE);
     } finally {
       setIsPending(false);
     }

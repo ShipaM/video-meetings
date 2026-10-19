@@ -1,70 +1,16 @@
 'use client';
 
 import { AlertDialog, Button, Chip, useOverlayState } from '@heroui/react';
-import { useEffect, useRef, useState } from 'react';
-import { clearAccessToken, getAccessToken } from '../../auth-storage';
-import { API_URL } from '../../constants';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatFileSize, formatMeetingDate, type MeetingFile } from '../../meetings';
-import { FILE_KIND_LABEL, FILE_STATUS } from './constants';
+import { DIALOG_CLOSE_FALLBACK_MS, FILE_KIND_LABEL, FILE_STATUS } from './constants';
 import { getExtension } from './file-types';
+import { deleteFile, downloadFile } from './files-api';
 
 /** Extension in upper case for display, e.g. `PDF`; falls back to the file kind. */
 function getTypeLabel(file: MeetingFile): string {
   const extension = getExtension(file.originalName).toUpperCase();
   return extension ? `${FILE_KIND_LABEL[file.kind]} · ${extension}` : FILE_KIND_LABEL[file.kind];
-}
-
-/** Asks the API for a short-lived signed link and lets the browser download it. */
-async function downloadFile(file: MeetingFile): Promise<string | null> {
-  const token = getAccessToken();
-  if (!token) {
-    clearAccessToken();
-    return null;
-  }
-  try {
-    const response = await fetch(`${API_URL}/meetings/${file.meetingId}/files/${file.id}/link`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (response.status === 401) {
-      clearAccessToken();
-      return null;
-    }
-    if (response.status === 404) return 'This file is no longer available.';
-    if (!response.ok) return 'Could not start the download. Please try again.';
-
-    const { url } = (await response.json()) as { url: string };
-    // The response is `Content-Disposition: attachment`, so the page stays where it is.
-    const link = document.createElement('a');
-    link.href = `${API_URL}${url}`;
-    link.rel = 'noreferrer';
-    document.body.append(link);
-    link.click();
-    link.remove();
-    return null;
-  } catch {
-    return 'The server is unavailable. Please try again later.';
-  }
-}
-
-type DeleteResult =
-  { type: 'deleted' } | { type: 'unauthorized' } | { type: 'error'; message: string };
-
-/** Deletes the stored original and its record; a file that is already gone counts as deleted. */
-async function deleteFile(file: MeetingFile): Promise<DeleteResult> {
-  const token = getAccessToken();
-  if (!token) return { type: 'unauthorized' };
-  try {
-    const response = await fetch(`${API_URL}/meetings/${file.meetingId}/files/${file.id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (response.status === 401) return { type: 'unauthorized' };
-    if (response.ok || response.status === 404) return { type: 'deleted' };
-    return { type: 'error', message: 'Could not delete the file. Please try again.' };
-  } catch {
-    return { type: 'error', message: 'The server is unavailable. Please try again later.' };
-  }
 }
 
 function TrashIcon() {
@@ -87,7 +33,10 @@ function TrashIcon() {
   );
 }
 
-/** Calls `onUnmount` when the dialog content leaves the DOM, i.e. after its exit animation. */
+/**
+ * Calls `onUnmount` when the dialog content leaves the DOM, i.e. after its exit animation. React
+ * Aria's `ModalOverlay` has no "closed" callback; unmounting the content is its end of closing.
+ */
 function UnmountListener({ onUnmount }: { onUnmount: () => void }) {
   const callback = useRef(onUnmount);
   useEffect(() => {
@@ -105,6 +54,17 @@ function DeleteFileButton({ file, onDeleted }: { file: MeetingFile; onDeleted: (
   // The row (and this button) goes only once the dialog has closed: the dialog returns focus to
   // this button first, so the page can then move it to the file section instead of losing it.
   const isDeleted = useRef(false);
+  const isReported = useRef(false);
+  const fallbackTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  /** Removes the row once, whichever comes first: the dialog unmounting or the fallback timer. */
+  const reportDeleted = useCallback(() => {
+    if (isReported.current) return;
+    isReported.current = true;
+    onDeleted();
+  }, [onDeleted]);
+
+  useEffect(() => () => clearTimeout(fallbackTimer.current), []);
 
   function handleOpenChange(isOpen: boolean) {
     if (isPending) return;
@@ -115,16 +75,17 @@ function DeleteFileButton({ file, onDeleted }: { file: MeetingFile; onDeleted: (
   async function handleConfirm() {
     setIsPending(true);
     setError(null);
-    const result = await deleteFile(file);
+    const result = await deleteFile(file.meetingId, file.id);
     setIsPending(false);
     if (result.type === 'deleted') {
       isDeleted.current = true;
       dialog.close();
-    } else if (result.type === 'unauthorized') {
-      clearAccessToken(); // expired token: back to the login page
-    } else {
+      // Should the dialog content stay mounted after closing, the row still goes.
+      fallbackTimer.current = setTimeout(reportDeleted, DIALOG_CLOSE_FALLBACK_MS);
+    } else if (result.type === 'error') {
       setError(result.message);
     }
+    // `unauthorized`: the token is cleared, the page goes to the login page.
   }
 
   return (
@@ -145,7 +106,7 @@ function DeleteFileButton({ file, onDeleted }: { file: MeetingFile; onDeleted: (
       >
         <AlertDialog.Container>
           <AlertDialog.Dialog className="sm:max-w-105">
-            <UnmountListener onUnmount={() => isDeleted.current && onDeleted()} />
+            <UnmountListener onUnmount={() => isDeleted.current && reportDeleted()} />
             <AlertDialog.Header>
               <AlertDialog.Icon status="danger" />
               <AlertDialog.Heading>Delete this file?</AlertDialog.Heading>

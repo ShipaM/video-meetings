@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { clearAccessToken, getEmailFromToken, useAccessToken } from './auth-storage';
-import { API_URL, RECENT_MEETINGS_COUNT } from './constants';
+import { API_URL, RECENT_MEETINGS_COUNT, SERVER_UNAVAILABLE_MESSAGE } from './constants';
 import { formatMeetingDate, type Meeting } from './meetings';
 
 type MeetingsState =
@@ -41,7 +41,7 @@ export default function HomePage() {
         setState({ type: 'ready', meetings: (await response.json()) as Meeting[] });
       } catch {
         if (controller.signal.aborted) return;
-        setState({ type: 'error', message: 'The server is unavailable. Please try again later.' });
+        setState({ type: 'error', message: SERVER_UNAVAILABLE_MESSAGE });
       }
     }
 
