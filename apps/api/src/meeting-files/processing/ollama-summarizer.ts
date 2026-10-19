@@ -89,6 +89,8 @@ export class OllamaSummarizer extends Summarizer {
         body: JSON.stringify({
           model: this.settings.model,
           stream: false,
+          // Thinking models (e.g. Qwen3) would reason at length first: slow on a CPU, not needed.
+          think: false,
           format: SUMMARY_SCHEMA,
           options: { num_ctx: this.settings.numCtx, temperature: 0.2 },
           messages: [

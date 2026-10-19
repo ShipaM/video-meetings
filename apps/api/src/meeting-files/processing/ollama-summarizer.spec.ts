@@ -59,6 +59,7 @@ describe('OllamaSummarizer', () => {
     expect(JSON.parse(init.body as string)).toMatchObject({
       model: 'test-model',
       stream: false,
+      think: false,
       format: { required: ['summary'] },
       options: { num_ctx: 100 },
     });
