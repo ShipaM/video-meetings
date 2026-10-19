@@ -17,9 +17,14 @@ import { CommandBus, QueryBus } from '@nestjs/cqrs';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import type { AuthenticatedRequest } from '../auth/jwt-auth.guard.js';
-import { DeleteMeetingFileCommand } from './commands/index.js';
-import type { FileLink, MeetingFileView } from './meeting-files.types.js';
-import { GetFileContentQuery, GetFileLinkQuery, ListMeetingFilesQuery } from './queries/index.js';
+import { DeleteMeetingFileCommand, RetryFileProcessingCommand } from './commands/index.js';
+import type { FileLink, MeetingFileDetails, MeetingFileView } from './meeting-files.types.js';
+import {
+  GetFileContentQuery,
+  GetFileLinkQuery,
+  GetMeetingFileQuery,
+  ListMeetingFilesQuery,
+} from './queries/index.js';
 
 @Controller()
 export class MeetingFilesController {
@@ -35,6 +40,28 @@ export class MeetingFilesController {
     @Param('id', ParseUUIDPipe) meetingId: string,
   ): Promise<MeetingFileView[]> {
     return this.queryBus.execute(new ListMeetingFilesQuery(user.id, meetingId));
+  }
+
+  @Get('meetings/:id/files/:fileId')
+  @UseGuards(JwtAuthGuard)
+  details(
+    @Req() { user }: AuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) meetingId: string,
+    @Param('fileId', ParseUUIDPipe) fileId: string,
+  ): Promise<MeetingFileDetails> {
+    return this.queryBus.execute(new GetMeetingFileQuery(user.id, meetingId, fileId));
+  }
+
+  /** Processes a failed document again: `202`, the file is `PROCESSING` until the job ends. */
+  @Post('meetings/:id/files/:fileId/retry')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.ACCEPTED)
+  retry(
+    @Req() { user }: AuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) meetingId: string,
+    @Param('fileId', ParseUUIDPipe) fileId: string,
+  ): Promise<MeetingFileDetails> {
+    return this.commandBus.execute(new RetryFileProcessingCommand(user.id, meetingId, fileId));
   }
 
   @Post('meetings/:id/files/:fileId/link')

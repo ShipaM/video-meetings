@@ -17,5 +17,22 @@ services:
       timeout: 5s
       retries: 5
 
+  # Local LLM for document summaries (AI_PROVIDER=local in apps/api/.env); nothing leaves the host.
+  # Pull the model once: docker compose exec ollama ollama pull qwen3:4b
+  ollama:
+    image: ollama/ollama:0.35.1
+    container_name: video-meetings-ollama
+    restart: unless-stopped
+    ports:
+      - '${OLLAMA_PORT:-11434}:11434'
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ['CMD', 'ollama', 'list']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   postgres_data:
+  ollama_models:

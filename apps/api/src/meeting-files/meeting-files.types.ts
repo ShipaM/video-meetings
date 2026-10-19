@@ -31,6 +31,16 @@ export const toMeetingFileView = (file: MeetingFile): MeetingFileView => ({
   completedAt: file.completedAt,
 });
 
+/** A file with the result of its processing (`GET /meetings/:id/files/:fileId`). */
+export interface MeetingFileDetails extends MeetingFileView {
+  /** Set once a document is `READY`; `null` before, on failure and for other kinds. */
+  summary: string | null;
+}
+
+export const toMeetingFileDetails = (
+  file: MeetingFile & { summary: { text: string } | null },
+): MeetingFileDetails => ({ ...toMeetingFileView(file), summary: file.summary?.text ?? null });
+
 /** A signed link to `GET /files/:fileId/content`, relative to the API base URL. */
 export interface FileLink {
   url: string;

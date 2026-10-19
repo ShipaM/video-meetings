@@ -1,0 +1,3 @@
+# Test fixtures are byte-exact (PDF xref offsets, hashes): never convert line endings.
+* binary
+.gitattributes text eol=lf

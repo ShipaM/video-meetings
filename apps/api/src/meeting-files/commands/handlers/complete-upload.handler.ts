@@ -4,6 +4,7 @@ import type { MeetingFile } from '../../../generated/prisma/client.js';
 import { PrismaService } from '../../../prisma/prisma.service.js';
 import { contentMatchesType } from '../../file-types.js';
 import { FilesStorageService } from '../../files-storage.service.js';
+import { ProcessingQueue } from '../../processing/processing-queue.js';
 import { CompleteUploadCommand } from '../complete-upload.command.js';
 
 /**
@@ -15,6 +16,7 @@ export class CompleteUploadHandler implements ICommandHandler<CompleteUploadComm
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: FilesStorageService,
+    private readonly processing: ProcessingQueue,
   ) {}
 
   async execute({ fileId }: CompleteUploadCommand): Promise<MeetingFile> {
@@ -33,11 +35,30 @@ export class CompleteUploadHandler implements ICommandHandler<CompleteUploadComm
       throw new BadRequestException('File content does not match its type');
     }
 
-    // Phase 1: nothing is processed yet, so a completed file is ready at once.
-    await this.prisma.meetingFile.updateMany({
-      where: { id: fileId, status: 'UPLOADING' },
-      data: { status: 'READY', completedAt: new Date() },
-    });
+    // Documents are summarized in the background; images (and, until Phase 9, recordings) are
+    // ready at once.
+    if (file.kind === 'DOCUMENT') {
+      // Status and job commit together; only the call that made the change queues the job
+      // (completion may run twice).
+      await this.prisma.$transaction(async (tx) => {
+        const [processing] = await tx.meetingFile.updateManyAndReturn({
+          where: { id: fileId, status: 'UPLOADING' },
+          data: {
+            status: 'PROCESSING',
+            completedAt: new Date(),
+            processingAttempt: { increment: 1 },
+          },
+        });
+        if (processing) {
+          await this.processing.queue(tx, fileId, processing.processingAttempt);
+        }
+      });
+    } else {
+      await this.prisma.meetingFile.updateMany({
+        where: { id: fileId, status: 'UPLOADING' },
+        data: { status: 'READY', completedAt: new Date() },
+      });
+    }
     // Cancelled or cleaned up meanwhile: the upload is gone, not a server error.
     const completed = await this.prisma.meetingFile.findUnique({ where: { id: fileId } });
     if (!completed) {
