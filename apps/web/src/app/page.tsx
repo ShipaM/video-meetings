@@ -3,19 +3,23 @@
 import { Alert, Button, Card, Skeleton, buttonVariants } from '@heroui/react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { clearAccessToken, getEmailFromToken, useAccessToken } from './auth-storage';
 import { API_URL, RECENT_MEETINGS_COUNT, SERVER_UNAVAILABLE_MESSAGE } from './constants';
 import { formatMeetingDate, type Meeting } from './meetings';
 import { SharedChip } from './shared-chip';
+import { useKeyedState } from './use-keyed-state';
 
 type MeetingsState =
   { type: 'loading' } | { type: 'error'; message: string } | { type: 'ready'; meetings: Meeting[] };
 
+const LOADING: MeetingsState = { type: 'loading' };
+
 export default function HomePage() {
   const router = useRouter();
   const token = useAccessToken();
-  const [state, setState] = useState<MeetingsState>({ type: 'loading' });
+  // Tied to the token: another user's meetings must never show, not even until the reload ends.
+  const [state, setState] = useKeyedState<MeetingsState>(token ?? '', LOADING);
 
   useEffect(() => {
     if (token === null) router.replace('/login');
@@ -48,7 +52,7 @@ export default function HomePage() {
 
     void load(token);
     return () => controller.abort();
-  }, [token]);
+  }, [token, setState]);
 
   // Nothing to show until the token is known; also covers the redirect to /login.
   if (!token) return <main className="flex flex-1" aria-busy="true" />;

@@ -3,11 +3,12 @@
 import { Alert, Card, Skeleton, buttonVariants } from '@heroui/react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { clearAccessToken, useAccessToken } from '../../auth-storage';
 import { API_URL, SERVER_UNAVAILABLE_MESSAGE } from '../../constants';
 import { formatMeetingDate, type Meeting, type MeetingFile } from '../../meetings';
 import { SharedChip } from '../../shared-chip';
+import { useKeyedState } from '../../use-keyed-state';
 import { FileList } from './file-list';
 import { ParticipantsSection } from './participants-section';
 import { UploadArea } from './upload-area';
@@ -17,6 +18,8 @@ type PageState =
   | { type: 'not-found' }
   | { type: 'error'; message: string }
   | { type: 'ready'; meeting: Meeting; files: MeetingFile[] };
+
+const LOADING: PageState = { type: 'loading' };
 
 type LoadResult = Exclude<PageState, { type: 'loading' }> | { type: 'unauthorized' };
 
@@ -72,19 +75,23 @@ const backLinkClass = buttonVariants({ variant: 'secondary', className: 'w-full 
 export function MeetingView({ meetingId }: { meetingId: string }) {
   const router = useRouter();
   const token = useAccessToken();
-  const [state, setState] = useState<PageState>({ type: 'loading' });
+  // Tied to the user and the meeting: nothing loaded for another user or meeting may show.
+  const [state, setState] = useKeyedState<PageState>(`${token ?? ''}:${meetingId}`, LOADING);
 
   useEffect(() => {
     if (token === null) router.replace('/login');
   }, [token, router]);
 
-  const applyResult = useCallback((result: LoadResult) => {
-    if (result.type === 'unauthorized') {
-      clearAccessToken(); // expired or invalid token: back to the login page
-      return;
-    }
-    setState(result);
-  }, []);
+  const applyResult = useCallback(
+    (result: LoadResult) => {
+      if (result.type === 'unauthorized') {
+        clearAccessToken(); // expired or invalid token: back to the login page
+        return;
+      }
+      setState(result);
+    },
+    [setState],
+  );
 
   useEffect(() => {
     if (!token) return;
@@ -117,7 +124,7 @@ export function MeetingView({ meetingId }: { meetingId: string }) {
     });
     latestRefresh.current = run;
     return run;
-  }, [token, meetingId]);
+  }, [token, meetingId, setState]);
 
   /**
    * Drops a deleted file at once, then reloads the list: the reload supersedes any refresh started
@@ -134,7 +141,7 @@ export function MeetingView({ meetingId }: { meetingId: string }) {
       // The delete button left with its row; keep keyboard focus in the file section.
       requestAnimationFrame(() => filesHeading.current?.focus());
     },
-    [refresh],
+    [refresh, setState],
   );
 
   if (!token) return <main className="flex flex-1" aria-busy="true" />;
