@@ -1,6 +1,6 @@
 'use client';
 
-import { Button, Chip } from '@heroui/react';
+import { AlertDialog, Button, Chip, useOverlayState } from '@heroui/react';
 import { useState } from 'react';
 import { clearAccessToken, getAccessToken } from '../../auth-storage';
 import { API_URL } from '../../constants';
@@ -47,7 +47,119 @@ async function downloadFile(file: MeetingFile): Promise<string | null> {
   }
 }
 
-function FileRow({ file }: { file: MeetingFile }) {
+type DeleteResult =
+  { type: 'deleted' } | { type: 'unauthorized' } | { type: 'error'; message: string };
+
+/** Deletes the stored original and its record; a file that is already gone counts as deleted. */
+async function deleteFile(file: MeetingFile): Promise<DeleteResult> {
+  const token = getAccessToken();
+  if (!token) return { type: 'unauthorized' };
+  try {
+    const response = await fetch(`${API_URL}/meetings/${file.meetingId}/files/${file.id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (response.status === 401) return { type: 'unauthorized' };
+    if (response.ok || response.status === 404) return { type: 'deleted' };
+    return { type: 'error', message: 'Could not delete the file. Please try again.' };
+  } catch {
+    return { type: 'error', message: 'The server is unavailable. Please try again later.' };
+  }
+}
+
+function TrashIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      className="size-5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3 6h18" />
+      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+      <path d="M10 11v6M14 11v6" />
+    </svg>
+  );
+}
+
+/** Delete button with a confirmation dialog; the dialog stays open until the API has answered. */
+function DeleteFileButton({ file, onDeleted }: { file: MeetingFile; onDeleted: () => void }) {
+  const dialog = useOverlayState();
+  const [isPending, setIsPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function handleOpenChange(isOpen: boolean) {
+    if (isPending) return;
+    setError(null);
+    dialog.setOpen(isOpen);
+  }
+
+  async function handleConfirm() {
+    setIsPending(true);
+    setError(null);
+    const result = await deleteFile(file);
+    setIsPending(false);
+    if (result.type === 'deleted') {
+      dialog.close();
+      onDeleted();
+    } else if (result.type === 'unauthorized') {
+      clearAccessToken(); // expired token: back to the login page
+    } else {
+      setError(result.message);
+    }
+  }
+
+  return (
+    <>
+      <Button
+        isIconOnly
+        variant="danger-soft"
+        className="size-11 shrink-0 sm:size-10"
+        aria-label={`Delete ${file.originalName}`}
+        onPress={dialog.open}
+      >
+        <TrashIcon />
+      </Button>
+      <AlertDialog.Backdrop isOpen={dialog.isOpen} onOpenChange={handleOpenChange}>
+        <AlertDialog.Container>
+          <AlertDialog.Dialog className="sm:max-w-[420px]">
+            <AlertDialog.Header>
+              <AlertDialog.Icon status="danger" />
+              <AlertDialog.Heading>Delete this file?</AlertDialog.Heading>
+            </AlertDialog.Header>
+            <AlertDialog.Body className="flex flex-col gap-3">
+              <p>
+                <strong className="break-all">{file.originalName}</strong> will be removed from the
+                meeting for everyone, and its download links will stop working. This cannot be
+                undone.
+              </p>
+              {error !== null && (
+                <p role="alert" className="text-danger text-sm">
+                  {error}
+                </p>
+              )}
+            </AlertDialog.Body>
+            <AlertDialog.Footer>
+              <Button slot="close" variant="tertiary" isDisabled={isPending}>
+                Keep file
+              </Button>
+              <Button variant="danger" isPending={isPending} onPress={handleConfirm}>
+                Delete file
+              </Button>
+            </AlertDialog.Footer>
+          </AlertDialog.Dialog>
+        </AlertDialog.Container>
+      </AlertDialog.Backdrop>
+    </>
+  );
+}
+
+function FileRow({ file, onDeleted }: { file: MeetingFile; onDeleted: () => void }) {
   const [isPending, setIsPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const status = FILE_STATUS[file.status];
@@ -80,20 +192,29 @@ function FileRow({ file }: { file: MeetingFile }) {
           </p>
         )}
       </div>
-      <Button
-        variant="secondary"
-        className="w-full sm:w-auto"
-        aria-label={`Download ${file.originalName}`}
-        isPending={isPending}
-        onPress={handleDownload}
-      >
-        Download
-      </Button>
+      <div className="flex gap-2">
+        <Button
+          variant="secondary"
+          className="min-h-11 flex-1 sm:min-h-10 sm:flex-none"
+          aria-label={`Download ${file.originalName}`}
+          isPending={isPending}
+          onPress={handleDownload}
+        >
+          Download
+        </Button>
+        <DeleteFileButton file={file} onDeleted={onDeleted} />
+      </div>
     </li>
   );
 }
 
-export function FileList({ files }: { files: MeetingFile[] }) {
+export function FileList({
+  files,
+  onDeleted,
+}: {
+  files: MeetingFile[];
+  onDeleted: (fileId: string) => void;
+}) {
   if (files.length === 0) {
     return (
       <p className="border-default rounded-2xl border border-dashed p-6 text-center text-sm">
@@ -104,7 +225,7 @@ export function FileList({ files }: { files: MeetingFile[] }) {
   return (
     <ul className="flex flex-col gap-2">
       {files.map((file) => (
-        <FileRow key={file.id} file={file} />
+        <FileRow key={file.id} file={file} onDeleted={() => onDeleted(file.id)} />
       ))}
     </ul>
   );

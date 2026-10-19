@@ -116,6 +116,22 @@ export function MeetingView({ meetingId }: { meetingId: string }) {
     return run;
   }, [token, meetingId]);
 
+  /**
+   * Drops a deleted file at once, then reloads the list: the reload supersedes any refresh started
+   * before the delete, whose response would otherwise bring the file back.
+   */
+  const removeFile = useCallback(
+    (fileId: string) => {
+      setState((current) =>
+        current.type === 'ready'
+          ? { ...current, files: current.files.filter((file) => file.id !== fileId) }
+          : current,
+      );
+      void refresh();
+    },
+    [refresh],
+  );
+
   if (!token) return <main className="flex flex-1" aria-busy="true" />;
 
   return (
@@ -184,7 +200,7 @@ export function MeetingView({ meetingId }: { meetingId: string }) {
                 <h2 id="files-heading" className="text-muted text-sm font-medium">
                   Files{state.files.length > 0 ? ` (${state.files.length})` : ''}
                 </h2>
-                <FileList files={state.files} />
+                <FileList files={state.files} onDeleted={removeFile} />
               </section>
             </Card.Content>
           </>
