@@ -1,11 +1,13 @@
 'use client';
 
-import { AlertDialog, Button, Chip, useOverlayState } from '@heroui/react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { AlertDialog, Button, Chip } from '@heroui/react';
+import { useState } from 'react';
 import { formatFileSize, formatMeetingDate, type MeetingFile } from '../../meetings';
-import { DIALOG_CLOSE_FALLBACK_MS, FILE_KIND_LABEL, FILE_STATUS } from './constants';
+import { FILE_KIND_LABEL, FILE_STATUS } from './constants';
 import { getExtension } from './file-types';
 import { deleteFile, downloadFile } from './files-api';
+import { UnmountListener } from './unmount-listener';
+import { useConfirmedRemoval } from './use-confirmed-removal';
 
 /** Extension in upper case for display, e.g. `PDF`; falls back to the file kind. */
 function getTypeLabel(file: MeetingFile): string {
@@ -33,60 +35,9 @@ function TrashIcon() {
   );
 }
 
-/**
- * Calls `onUnmount` when the dialog content leaves the DOM, i.e. after its exit animation. React
- * Aria's `ModalOverlay` has no "closed" callback; unmounting the content is its end of closing.
- */
-function UnmountListener({ onUnmount }: { onUnmount: () => void }) {
-  const callback = useRef(onUnmount);
-  useEffect(() => {
-    callback.current = onUnmount;
-  }, [onUnmount]);
-  useEffect(() => () => callback.current(), []);
-  return null;
-}
-
 /** Delete button with a confirmation dialog; the dialog stays open until the API has answered. */
 function DeleteFileButton({ file, onDeleted }: { file: MeetingFile; onDeleted: () => void }) {
-  const dialog = useOverlayState();
-  const [isPending, setIsPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  // The row (and this button) goes only once the dialog has closed: the dialog returns focus to
-  // this button first, so the page can then move it to the file section instead of losing it.
-  const isDeleted = useRef(false);
-  const isReported = useRef(false);
-  const fallbackTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-
-  /** Removes the row once, whichever comes first: the dialog unmounting or the fallback timer. */
-  const reportDeleted = useCallback(() => {
-    if (isReported.current) return;
-    isReported.current = true;
-    onDeleted();
-  }, [onDeleted]);
-
-  useEffect(() => () => clearTimeout(fallbackTimer.current), []);
-
-  function handleOpenChange(isOpen: boolean) {
-    if (isPending) return;
-    setError(null);
-    dialog.setOpen(isOpen);
-  }
-
-  async function handleConfirm() {
-    setIsPending(true);
-    setError(null);
-    const result = await deleteFile(file.meetingId, file.id);
-    setIsPending(false);
-    if (result.type === 'deleted') {
-      isDeleted.current = true;
-      dialog.close();
-      // Should the dialog content stay mounted after closing, the row still goes.
-      fallbackTimer.current = setTimeout(reportDeleted, DIALOG_CLOSE_FALLBACK_MS);
-    } else if (result.type === 'error') {
-      setError(result.message);
-    }
-    // `unauthorized`: the token is cleared, the page goes to the login page.
-  }
+  const removal = useConfirmedRemoval(onDeleted);
 
   return (
     <>
@@ -95,18 +46,18 @@ function DeleteFileButton({ file, onDeleted }: { file: MeetingFile; onDeleted: (
         variant="danger-soft"
         className="size-11 shrink-0 sm:size-10"
         aria-label={`Delete ${file.originalName}`}
-        onPress={dialog.open}
+        onPress={removal.open}
       >
         <TrashIcon />
       </Button>
       <AlertDialog.Backdrop
-        isOpen={dialog.isOpen}
-        onOpenChange={handleOpenChange}
+        isOpen={removal.isOpen}
+        onOpenChange={removal.onOpenChange}
         isKeyboardDismissDisabled={false}
       >
         <AlertDialog.Container>
           <AlertDialog.Dialog className="sm:max-w-105">
-            <UnmountListener onUnmount={() => isDeleted.current && reportDeleted()} />
+            <UnmountListener onUnmount={removal.onDialogUnmount} />
             <AlertDialog.Header>
               <AlertDialog.Icon status="danger" />
               <AlertDialog.Heading>Delete this file?</AlertDialog.Heading>
@@ -117,17 +68,21 @@ function DeleteFileButton({ file, onDeleted }: { file: MeetingFile; onDeleted: (
                 meeting for everyone, and its download links will stop working. This cannot be
                 undone.
               </p>
-              {error !== null && (
+              {removal.error !== null && (
                 <p role="alert" className="text-danger text-sm">
-                  {error}
+                  {removal.error}
                 </p>
               )}
             </AlertDialog.Body>
             <AlertDialog.Footer>
-              <Button slot="close" variant="tertiary" isDisabled={isPending}>
+              <Button slot="close" variant="tertiary" isDisabled={removal.isPending}>
                 Keep file
               </Button>
-              <Button variant="danger" isPending={isPending} onPress={handleConfirm}>
+              <Button
+                variant="danger"
+                isPending={removal.isPending}
+                onPress={() => removal.confirm(() => deleteFile(file.meetingId, file.id))}
+              >
                 Delete file
               </Button>
             </AlertDialog.Footer>
@@ -138,7 +93,14 @@ function DeleteFileButton({ file, onDeleted }: { file: MeetingFile; onDeleted: (
   );
 }
 
-function FileRow({ file, onDeleted }: { file: MeetingFile; onDeleted: () => void }) {
+function FileRow({
+  file,
+  onDeleted,
+}: {
+  file: MeetingFile;
+  /** Absent for a participant, who may not delete (no button is shown). */
+  onDeleted?: () => void;
+}) {
   const [isPending, setIsPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const status = FILE_STATUS[file.status];
@@ -181,7 +143,7 @@ function FileRow({ file, onDeleted }: { file: MeetingFile; onDeleted: () => void
         >
           Download
         </Button>
-        <DeleteFileButton file={file} onDeleted={onDeleted} />
+        {onDeleted && <DeleteFileButton file={file} onDeleted={onDeleted} />}
       </div>
     </li>
   );
@@ -192,19 +154,22 @@ export function FileList({
   onDeleted,
 }: {
   files: MeetingFile[];
-  onDeleted: (fileId: string) => void;
+  /** Omitted for a read-only (participant) view: the delete buttons are hidden. */
+  onDeleted?: (fileId: string) => void;
 }) {
   if (files.length === 0) {
     return (
       <p className="border-default rounded-2xl border border-dashed p-6 text-center text-sm">
-        No files yet. Upload recordings, documents or images above.
+        {onDeleted
+          ? 'No files yet. Upload recordings, documents or images above.'
+          : 'No files yet. The owner has not uploaded anything to this meeting.'}
       </p>
     );
   }
   return (
     <ul className="flex flex-col gap-2">
       {files.map((file) => (
-        <FileRow key={file.id} file={file} onDeleted={() => onDeleted(file.id)} />
+        <FileRow key={file.id} file={file} onDeleted={onDeleted && (() => onDeleted(file.id))} />
       ))}
     </ul>
   );

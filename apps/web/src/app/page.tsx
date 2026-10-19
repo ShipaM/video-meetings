@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 import { clearAccessToken, getEmailFromToken, useAccessToken } from './auth-storage';
 import { API_URL, RECENT_MEETINGS_COUNT, SERVER_UNAVAILABLE_MESSAGE } from './constants';
 import { formatMeetingDate, type Meeting } from './meetings';
+import { SharedChip } from './shared-chip';
 
 type MeetingsState =
   { type: 'loading' } | { type: 'error'; message: string } | { type: 'ready'; meetings: Meeting[] };
@@ -14,14 +15,23 @@ type MeetingsState =
 export default function HomePage() {
   const router = useRouter();
   const token = useAccessToken();
-  const [state, setState] = useState<MeetingsState>({ type: 'loading' });
 
   useEffect(() => {
     if (token === null) router.replace('/login');
   }, [token, router]);
 
+  // Nothing to show until the token is known; also covers the redirect to /login.
+  if (!token) return <main className="flex flex-1" aria-busy="true" />;
+
+  // Next.js keeps a route's state when it is left. The key gives another user a fresh tree, so the
+  // previous user's meetings never show, not even until the new ones have loaded.
+  return <HomeContent key={token} token={token} />;
+}
+
+function HomeContent({ token }: { token: string }) {
+  const [state, setState] = useState<MeetingsState>({ type: 'loading' });
+
   useEffect(() => {
-    if (!token) return;
     const controller = new AbortController();
 
     async function load(accessToken: string) {
@@ -48,9 +58,6 @@ export default function HomePage() {
     void load(token);
     return () => controller.abort();
   }, [token]);
-
-  // Nothing to show until the token is known; also covers the redirect to /login.
-  if (!token) return <main className="flex flex-1" aria-busy="true" />;
 
   const email = getEmailFromToken(token);
   const meetings = state.type === 'ready' ? state.meetings : [];
@@ -114,7 +121,12 @@ export default function HomePage() {
                       className="border-default hover:border-accent hover:bg-accent/5 focus-visible:ring-accent flex items-center gap-3 rounded-2xl border px-4 py-3 transition-colors duration-200 focus-visible:ring-2 focus-visible:outline-none"
                     >
                       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                        <span className="font-medium wrap-break-word">{meeting.title}</span>
+                        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <span className="min-w-0 font-medium wrap-break-word">
+                            {meeting.title}
+                          </span>
+                          {meeting.role === 'participant' && <SharedChip />}
+                        </span>
                         <time dateTime={meeting.startsAt} className="text-muted text-sm">
                           {formatMeetingDate(meeting.startsAt)}
                         </time>

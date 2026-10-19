@@ -111,3 +111,20 @@ export const DELETE_FAILED_MESSAGE = 'Could not delete the file. Please try agai
 
 /** Longest wait for the delete dialog's exit animation before the deleted row is removed anyway. */
 export const DIALOG_CLOSE_FALLBACK_MS = 1000;
+
+/** Messages of the participants section. */
+export const PARTICIPANTS_LOAD_FAILED_MESSAGE = 'Could not load the participants.';
+export const PARTICIPANT_ADD_FAILED_MESSAGE = 'Could not add the participant. Please try again.';
+export const PARTICIPANT_REMOVE_FAILED_MESSAGE =
+  'Could not remove the participant. Please try again.';
+/** Shown when the meeting itself is gone (deleted, or access lost) while acting on it. */
+export const MEETING_GONE_MESSAGE = 'This meeting is no longer available. Reload the page.';
+/** The API's `404` message for a missing (or foreign) meeting, as opposed to a missing participant. */
+export const MEETING_NOT_FOUND_API_MESSAGE = 'Meeting not found';
+/** Shown for an add the API rejected without a readable message, by its status. */
+export const PARTICIPANT_ADD_ERROR_MESSAGES: Partial<Record<number, string>> = {
+  400: 'Enter the e-mail of another registered user.',
+  403: 'Only the owner can manage participants.',
+  404: 'No registered user has this e-mail.',
+  409: 'This user is already a participant.',
+};

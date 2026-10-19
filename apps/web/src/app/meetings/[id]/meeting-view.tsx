@@ -7,7 +7,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { clearAccessToken, useAccessToken } from '../../auth-storage';
 import { API_URL, SERVER_UNAVAILABLE_MESSAGE } from '../../constants';
 import { formatMeetingDate, type Meeting, type MeetingFile } from '../../meetings';
+import { SharedChip } from '../../shared-chip';
 import { FileList } from './file-list';
+import { ParticipantsSection } from './participants-section';
 import { UploadArea } from './upload-area';
 
 type PageState =
@@ -70,11 +72,20 @@ const backLinkClass = buttonVariants({ variant: 'secondary', className: 'w-full 
 export function MeetingView({ meetingId }: { meetingId: string }) {
   const router = useRouter();
   const token = useAccessToken();
-  const [state, setState] = useState<PageState>({ type: 'loading' });
 
   useEffect(() => {
     if (token === null) router.replace('/login');
   }, [token, router]);
+
+  if (!token) return <main className="flex flex-1" aria-busy="true" />;
+
+  // Next.js keeps a route's state when it is left. The key gives another user (or meeting) a fresh
+  // tree, so nothing of the previous one shows: not the data, uploads or participants.
+  return <MeetingContent key={`${token}:${meetingId}`} token={token} meetingId={meetingId} />;
+}
+
+function MeetingContent({ token, meetingId }: { token: string; meetingId: string }) {
+  const [state, setState] = useState<PageState>({ type: 'loading' });
 
   const applyResult = useCallback((result: LoadResult) => {
     if (result.type === 'unauthorized') {
@@ -85,7 +96,6 @@ export function MeetingView({ meetingId }: { meetingId: string }) {
   }, []);
 
   useEffect(() => {
-    if (!token) return;
     const controller = new AbortController();
     fetchMeeting(token, meetingId, controller.signal).then(applyResult, () => {
       // Aborted: the page was left or the token changed.
@@ -101,7 +111,6 @@ export function MeetingView({ meetingId }: { meetingId: string }) {
 
   /** Reloads the file list after an upload; keeps the page if the reload fails. */
   const refresh = useCallback((): Promise<void> => {
-    if (!token) return Promise.resolve();
     const id = ++refreshId.current;
     const run = fetchFiles(token, meetingId).then((result) => {
       if (id !== refreshId.current) return latestRefresh.current;
@@ -135,7 +144,8 @@ export function MeetingView({ meetingId }: { meetingId: string }) {
     [refresh],
   );
 
-  if (!token) return <main className="flex flex-1" aria-busy="true" />;
+  // Participants get a read-only page: no upload, delete or participant management.
+  const isOwner = state.type === 'ready' && state.meeting.role === 'owner';
 
   return (
     <main className="flex flex-1 items-start justify-center p-4 pt-16 sm:p-6 sm:pt-20">
@@ -188,16 +198,26 @@ export function MeetingView({ meetingId }: { meetingId: string }) {
               >
                 ← All meetings
               </Link>
-              <h1 className="text-2xl font-semibold wrap-break-word">{state.meeting.title}</h1>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <h1 className="min-w-0 text-2xl font-semibold wrap-break-word">
+                  {state.meeting.title}
+                </h1>
+                {!isOwner && <SharedChip />}
+              </div>
               <Card.Description>
                 <time dateTime={state.meeting.startsAt}>
                   {formatMeetingDate(state.meeting.startsAt)}
                 </time>
               </Card.Description>
+              {!isOwner && (
+                <p className="text-muted text-sm">
+                  Shared with you: you can view and download files, only the owner can change them.
+                </p>
+              )}
             </Card.Header>
 
             <Card.Content className="flex flex-col gap-6 pt-4">
-              <UploadArea meetingId={state.meeting.id} onUploaded={refresh} />
+              {isOwner && <UploadArea meetingId={state.meeting.id} onUploaded={refresh} />}
 
               <section aria-labelledby="files-heading" className="flex flex-col gap-3">
                 <h2
@@ -208,8 +228,10 @@ export function MeetingView({ meetingId }: { meetingId: string }) {
                 >
                   Files{state.files.length > 0 ? ` (${state.files.length})` : ''}
                 </h2>
-                <FileList files={state.files} onDeleted={removeFile} />
+                <FileList files={state.files} onDeleted={isOwner ? removeFile : undefined} />
               </section>
+
+              {isOwner && <ParticipantsSection meetingId={state.meeting.id} />}
             </Card.Content>
           </>
         )}

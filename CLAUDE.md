@@ -37,6 +37,8 @@ Target one workspace with `npm run <script> --workspace=web|api`.
 
 - Single Prettier config in the root `.prettierrc` (single quotes, trailing commas, width 100); ESLint config is per app.
 - The repository is English-only: documentation, code comments and commit messages are in English.
+- Commit messages and pull request descriptions never mention an AI assistant, chatbot or Claude Code: no
+  "Generated with Claude Code" line, no `Co-Authored-By` trailer for an AI, plain conventional commits only.
 - If `next build` fails with a `useContext` / prerender error, check that `NODE_ENV` is not set to `development` in the shell.
 
 ## Git hooks
@@ -45,7 +47,7 @@ Husky (`.husky/pre-commit`, installed by the root `prepare` script on `npm insta
 
 ## MCP
 
-`.mcp.json` in the root registers the project-scoped Playwright MCP server (`npx @playwright/mcp@latest`, started via `cmd /c` on Windows) for browser automation. Claude Code asks to approve it on first use; on macOS/Linux change the command to plain `npx`.
+`.mcp.json` in the root registers the project-scoped Playwright MCP server (`npx @playwright/mcp@0.0.83`, started via `cmd /c` on Windows) for browser automation. Claude Code asks to approve it on first use; on macOS/Linux change the command to plain `npx`. The version is pinned on purpose: with `@latest` npx checks the registry on every start, which takes 15-40 s on Windows and often exceeds the 30 s MCP connection timeout. Bump it deliberately.
 
 ## Keeping documentation up to date
 

@@ -1,6 +1,7 @@
 import { authorizedFetch } from '../../api';
 import { API_URL, SERVER_UNAVAILABLE_MESSAGE } from '../../constants';
 import type { MeetingFile } from '../../meetings';
+import type { RemovalResult } from './use-confirmed-removal';
 import { DELETE_FAILED_MESSAGE, DOWNLOAD_FAILED_MESSAGE, FILE_GONE_MESSAGE } from './constants';
 
 /**
@@ -30,17 +31,14 @@ export async function downloadFile(file: MeetingFile): Promise<string | null> {
   }
 }
 
-export type DeleteResult =
-  { type: 'deleted' } | { type: 'unauthorized' } | { type: 'error'; message: string };
-
 /** Deletes a stored file and its record; a file that is already gone counts as deleted. */
-export async function deleteFile(meetingId: string, fileId: string): Promise<DeleteResult> {
+export async function deleteFile(meetingId: string, fileId: string): Promise<RemovalResult> {
   try {
     const response = await authorizedFetch(`/meetings/${meetingId}/files/${fileId}`, {
       method: 'DELETE',
     });
     if (!response) return { type: 'unauthorized' };
-    if (response.ok || response.status === 404) return { type: 'deleted' };
+    if (response.ok || response.status === 404) return { type: 'removed' };
     return { type: 'error', message: DELETE_FAILED_MESSAGE };
   } catch {
     return { type: 'error', message: SERVER_UNAVAILABLE_MESSAGE };
