@@ -77,7 +77,7 @@ the meeting's file list and download the original. Files live on local disk, out
 - [x] A network error shows an error on that file with "Retry", which resumes from the server offset without
       re-selecting the file (same page session).
 - [x] Delete with a confirmation dialog.
-- [ ] `ui-ux-pro-max` + Playwright MCP visual check, including an offline/online cut mid-upload.
+- [x] `ui-ux-pro-max` + Playwright MCP visual check, including an offline/online cut mid-upload.
       **Done when:** in the browser cancel leaves nothing in the list, a cut-and-restored upload continues from where
       it stopped after "Retry", and a deleted file disappears from the list.
 
