@@ -102,7 +102,8 @@ export class MeetingFilesController {
 
     // Sets `Content-Disposition: attachment` with an RFC 5987 `filename*` for non-ASCII names.
     res.attachment(file.originalName);
-    if (disposition === 'inline' && INLINE_MIME_TYPES.includes(file.mimeType)) {
+    const inline = disposition === 'inline' && INLINE_MIME_TYPES.includes(file.mimeType);
+    if (inline) {
       // Same header with the inline type: the file name is kept for "Save as".
       res.set(
         'Content-Disposition',
@@ -113,6 +114,9 @@ export class MeetingFilesController {
       res.sendFile(
         file.path,
         {
+          // A preview gets the whole file in one response: the token is checked when a request
+          // starts, so a PDF viewer asking for more ranges after the 5 minutes would get 401.
+          acceptRanges: !inline,
           headers: {
             'Content-Type': file.mimeType,
             'X-Content-Type-Options': 'nosniff',

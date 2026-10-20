@@ -1,5 +1,6 @@
 import type { MeetingFile } from '../generated/prisma/client.js';
 import type { MeetingFileKind, MeetingFileStatus } from '../generated/prisma/enums.js';
+import { INLINE_MIME_TYPES } from './meeting-files.config.js';
 
 /** A meeting file as returned by the API (the storage key stays internal). */
 export interface MeetingFileView {
@@ -12,6 +13,8 @@ export interface MeetingFileView {
   size: number;
   status: MeetingFileStatus;
   failureReason: string | null;
+  /** Whether a link serves the file inline (`disposition=inline`), so a page can preview it. */
+  previewable: boolean;
   uploadedById: string;
   createdAt: Date;
   completedAt: Date | null;
@@ -26,6 +29,7 @@ export const toMeetingFileView = (file: MeetingFile): MeetingFileView => ({
   size: Number(file.size),
   status: file.status,
   failureReason: file.failureReason,
+  previewable: INLINE_MIME_TYPES.includes(file.mimeType),
   uploadedById: file.uploadedById,
   createdAt: file.createdAt,
   completedAt: file.completedAt,

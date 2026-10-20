@@ -31,6 +31,7 @@ interface FileBody {
   kind: string;
   size: number;
   status: string;
+  previewable: boolean;
   createdAt: string;
 }
 
@@ -445,7 +446,18 @@ describe('Meeting files (e2e)', () => {
         expect(res.headers['content-type']).toBe(type);
         expect(res.headers['content-disposition']).toBe(`inline; filename="${name}"`);
         expect(res.headers['x-content-type-options']).toBe('nosniff');
+        // No byte ranges: a viewer loads the whole file while the short-lived link is valid,
+        // instead of asking for more ranges after it expired.
+        expect(res.headers['accept-ranges']).toBeUndefined();
+        const ranged = await download(`${(link.body as LinkBody).url}&disposition=inline`)
+          .set('Range', 'bytes=0-9')
+          .expect(200);
+        expect(ranged.headers['content-range']).toBeUndefined();
       }
+
+      const listed = await listFiles(ownerToken, meetingId);
+      expect(listed.find((file) => file.id === fileIdOf(pdf))?.previewable).toBe(true);
+      expect(listed.find((file) => file.id === fileIdOf(png))?.previewable).toBe(true);
     });
 
     it('keeps other types an attachment even when inline is asked', async () => {
@@ -454,6 +466,10 @@ describe('Meeting files (e2e)', () => {
       const link = await requestLink(ownerToken, meetingId, fileIdOf(location)).expect(201);
       const res = await download(`${(link.body as LinkBody).url}&disposition=inline`).expect(200);
       expect(res.headers['content-disposition']).toBe('attachment; filename="call.mp4"');
+      expect(res.headers['accept-ranges']).toBe('bytes');
+
+      const listed = await listFiles(ownerToken, meetingId);
+      expect(listed.find((file) => file.id === fileIdOf(location))?.previewable).toBe(false);
     });
 
     it('does not issue a link for an upload that is not complete (404)', async () => {
