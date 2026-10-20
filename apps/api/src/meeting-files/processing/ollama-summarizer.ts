@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 import type { OllamaSettings } from './processing.config.js';
-import { Summarizer, SummaryError } from './summarizer.js';
+import { Summarizer, SummaryError, type SummarySource } from './summarizer.js';
 
 /** The answer shape requested through Ollama's `format` (a JSON schema). */
 const SUMMARY_SCHEMA = {
@@ -9,21 +9,32 @@ const SUMMARY_SCHEMA = {
   required: ['summary'],
 };
 
-const SUMMARY_PROMPT =
-  'You summarize meeting documents. Write a concise summary in English: the topic, the key ' +
-  'points and decisions, and any action items with their owners. Use short "- " bullet points, ' +
-  'at most 10. Do not invent anything that is not in the text. Answer as JSON: {"summary": "..."}.';
+/** Instructions for the whole text, for one part of it, and for combining part summaries. */
+interface Prompts {
+  whole: string;
+  part: string;
+  combine: string;
+}
 
-const PART_PROMPT =
-  'You summarize one part of a longer meeting document. List its key points, decisions and ' +
-  'action items as short "- " bullet points. Do not invent anything that is not in the text. ' +
-  'Answer as JSON: {"summary": "..."}.';
-
-const COMBINE_PROMPT =
-  'These are summaries of consecutive parts of one meeting document. Merge them into one concise ' +
-  'summary in English: the topic, the key points and decisions, and the action items with their ' +
-  'owners, as short "- " bullet points, at most 10, without repeating anything. Answer as JSON: ' +
-  '{"summary": "..."}.';
+/** The instructions for each step, worded for a document or a transcript. */
+const prompts = (source: SummarySource): Prompts => {
+  const what = source === 'transcript' ? 'meeting transcript' : 'meeting document';
+  return {
+    whole:
+      `You summarize a ${what}. Write a concise summary in English: the topic, the key points ` +
+      'and decisions, and any action items with their owners. Use short "- " bullet points, at ' +
+      'most 10. Do not invent anything that is not in the text. Answer as JSON: {"summary": "..."}.',
+    part:
+      `You summarize one part of a longer ${what}. List its key points, decisions and action ` +
+      'items as short "- " bullet points. Do not invent anything that is not in the text. Answer ' +
+      'as JSON: {"summary": "..."}.',
+    combine:
+      `These are summaries of consecutive parts of one ${what}. Merge them into one concise ` +
+      'summary in English: the topic, the key points and decisions, and the action items with ' +
+      'their owners, as short "- " bullet points, at most 10, without repeating anything. Answer ' +
+      'as JSON: {"summary": "..."}.',
+  };
+};
 
 /** Rounds of combining part summaries before giving up (each round must shorten the text). */
 const MAX_COMBINE_ROUNDS = 3;
@@ -67,29 +78,38 @@ export class OllamaSummarizer extends Summarizer {
     this.maxChars = chunkCharsFor(settings.numCtx);
   }
 
-  summarize(text: string, signal: AbortSignal): Promise<string> {
-    return this.summarizeRound(text, signal, 0);
+  summarize(
+    text: string,
+    signal: AbortSignal,
+    source: SummarySource = 'document',
+  ): Promise<string> {
+    return this.summarizeRound(text, signal, prompts(source), 0);
   }
 
-  private async summarizeRound(text: string, signal: AbortSignal, round: number): Promise<string> {
+  private async summarizeRound(
+    text: string,
+    signal: AbortSignal,
+    prompt: Prompts,
+    round: number,
+  ): Promise<string> {
     const parts = splitText(text, this.maxChars);
     if (parts.length === 1) {
-      return this.ask(round === 0 ? SUMMARY_PROMPT : COMBINE_PROMPT, parts[0], signal);
+      return this.ask(round === 0 ? prompt.whole : prompt.combine, parts[0], signal);
     }
     const summaries: string[] = [];
     for (const part of parts) {
-      summaries.push(await this.ask(PART_PROMPT, part, signal));
+      summaries.push(await this.ask(prompt.part, part, signal));
     }
     const combined = summaries.join('\n\n');
     if (combined.length <= this.maxChars) {
-      return this.ask(COMBINE_PROMPT, combined, signal);
+      return this.ask(prompt.combine, combined, signal);
     }
     // Still too long for one request: summarize the part summaries the same way, as long as that
     // converges.
     if (round + 1 >= MAX_COMBINE_ROUNDS || combined.length >= text.length) {
       throw this.failure('The part summaries do not get shorter; giving up');
     }
-    return this.summarizeRound(combined, signal, round + 1);
+    return this.summarizeRound(combined, signal, prompt, round + 1);
   }
 
   private async ask(instructions: string, text: string, signal: AbortSignal): Promise<string> {

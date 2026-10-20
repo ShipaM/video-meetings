@@ -19,15 +19,15 @@ describe('FailStuckProcessingHandler', () => {
   });
 
   it('fails a PROCESSING file whose job is gone, conditional on its attempt', async () => {
-    findMany.mockResolvedValue([{ id: 'f1', processingAttempt: 2 }]);
+    findMany.mockResolvedValue([{ id: 'f1', kind: 'AUDIO', processingAttempt: 2 }]);
     hasLiveJob.mockResolvedValue(false);
 
     await expect(handler.execute(new FailStuckProcessingCommand(cutoff))).resolves.toBe(1);
     expect(findMany).toHaveBeenCalledWith({
       where: { status: 'PROCESSING', updatedAt: { lt: cutoff } },
-      select: { id: true, processingAttempt: true },
+      select: { id: true, kind: true, processingAttempt: true },
     });
-    expect(hasLiveJob).toHaveBeenCalledWith('f1', 2);
+    expect(hasLiveJob).toHaveBeenCalledWith('AUDIO', 'f1', 2);
     expect(updateMany).toHaveBeenCalledWith({
       where: { id: 'f1', status: 'PROCESSING', processingAttempt: 2 },
       data: { status: 'FAILED', failureReason: 'Processing was interrupted' },

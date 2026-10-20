@@ -77,9 +77,25 @@ describe('CompleteUploadHandler', () => {
         processingAttempt: { increment: 1 },
       },
     });
-    expect(queue).toHaveBeenCalledWith(tx, 'f1', 1);
+    expect(queue).toHaveBeenCalledWith(tx, 'DOCUMENT', 'f1', 1);
     expect(updateMany).not.toHaveBeenCalled();
     expect(removeQuietly).not.toHaveBeenCalled();
+  });
+
+  it('sends a recording to PROCESSING and queues its job by kind', async () => {
+    const recording = { ...uploading, kind: 'AUDIO', mimeType: 'audio/mpeg' };
+    // An MPEG audio frame header: detected as mp3.
+    const frame = Buffer.concat([Buffer.from([0xff, 0xfb, 0x90, 0x64]), Buffer.alloc(400)]);
+    await writeFile(path.join(dir, 'f1'), frame);
+    updateManyAndReturn.mockResolvedValue([{ ...recording, processingAttempt: 1 }]);
+    findUnique
+      .mockResolvedValueOnce(recording)
+      .mockResolvedValueOnce({ ...recording, status: 'PROCESSING', processingAttempt: 1 });
+
+    await handler.execute(new CompleteUploadCommand('f1'));
+
+    expect(queue).toHaveBeenCalledWith(tx, 'AUDIO', 'f1', 1);
+    expect(updateMany).not.toHaveBeenCalled();
   });
 
   it('fails as a whole when the job cannot be queued (the file stays UPLOADING)', async () => {

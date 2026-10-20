@@ -115,6 +115,11 @@ const ALLOWED_TYPES: AllowedType[] = [
 /** Declared types that carry no information; the extension decides then. */
 const UNKNOWN_DECLARED = ['', 'application/octet-stream'];
 
+/** Kinds that are transcribed: audio and video recordings. */
+export const RECORDING_KINDS: readonly MeetingFileKind[] = ['AUDIO', 'VIDEO'];
+
+export const isRecording = (kind: MeetingFileKind): boolean => RECORDING_KINDS.includes(kind);
+
 export interface ResolvedFileType {
   kind: MeetingFileKind;
   mimeType: string;

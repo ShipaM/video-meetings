@@ -4,7 +4,7 @@ import type { MeetingFile } from '../../../generated/prisma/client.js';
 import { PrismaService } from '../../../prisma/prisma.service.js';
 import { contentMatchesType } from '../../file-types.js';
 import { FilesStorageService } from '../../files-storage.service.js';
-import { ProcessingQueue } from '../../processing/processing-queue.js';
+import { PROCESSED_KINDS, ProcessingQueue } from '../../processing/processing-queue.js';
 import { CompleteUploadCommand } from '../complete-upload.command.js';
 
 /**
@@ -35,9 +35,8 @@ export class CompleteUploadHandler implements ICommandHandler<CompleteUploadComm
       throw new BadRequestException('File content does not match its type');
     }
 
-    // Documents are summarized in the background; images (and, until Phase 9, recordings) are
-    // ready at once.
-    if (file.kind === 'DOCUMENT') {
+    // Documents and recordings are processed in the background; images are ready at once.
+    if (PROCESSED_KINDS.includes(file.kind)) {
       // Status and job commit together; only the call that made the change queues the job
       // (completion may run twice).
       await this.prisma.$transaction(async (tx) => {
@@ -50,7 +49,7 @@ export class CompleteUploadHandler implements ICommandHandler<CompleteUploadComm
           },
         });
         if (processing) {
-          await this.processing.queue(tx, fileId, processing.processingAttempt);
+          await this.processing.queue(tx, file.kind, fileId, processing.processingAttempt);
         }
       });
     } else {

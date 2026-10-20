@@ -4,8 +4,15 @@ import path from 'node:path';
 import { FileStore } from '@tus/file-store';
 import { resolveFilesDir } from './meeting-files.config.js';
 
-/** Storage keys are file ids (UUIDs); anything else in the directory is not ours to remove. */
-const STORED_NAME = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(\.json)?$/;
+/** A file id: names on disk derive from it, anything else in the directories is not ours. */
+const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+/** Storage keys are file ids. */
+const STORED_NAME = new RegExp(`^(${UUID})(\\.json)?$`);
+/**
+ * Work directories are named `<fileId>.<processing attempt>`: a retry gets a directory of its own,
+ * so the orphan sweep can never remove the directory of a job that has just started.
+ */
+const WORK_DIR_NAME = new RegExp(`^(${UUID})\\.(\\d+)$`);
 
 /**
  * Removes a data file and its tus metadata (`<key>.json`, the `FileStore` default). Idempotent:
@@ -34,19 +41,58 @@ export interface StoredEntry {
   modifiedAt: Date;
 }
 
+/** A job's work directory found on disk. */
+export interface WorkDirEntry {
+  fileId: string;
+  attempt: number;
+  modifiedAt: Date;
+}
+
 /**
  * Local disk storage of meeting files. tus writes uploads in place into `FILES_DIR/uploads/<key>`
  * (plus a `<key>.json` metadata sidecar); the completed data file stays there as the original.
+ * Processing jobs keep temporary files (a recording's extracted audio) in
+ * `FILES_DIR/derived/<fileId>.<attempt>`, removed when the job ends.
  */
 @Injectable()
 export class FilesStorageService {
   private readonly logger = new Logger(FilesStorageService.name);
   readonly root = resolveFilesDir();
   readonly uploadsDir = path.join(this.root, 'uploads');
+  readonly derivedDir = path.join(this.root, 'derived');
   readonly store: FileStore = new MeetingFileStore({ directory: this.uploadsDir });
 
   pathOf(storageKey: string): string {
     return path.join(this.uploadsDir, storageKey);
+  }
+
+  /** The work directory of a processing attempt of the file (not created here). */
+  workDirOf(fileId: string, attempt: number): string {
+    return path.join(this.derivedDir, `${fileId}.${attempt}`);
+  }
+
+  /** Every work directory on disk with its file, attempt and modification time. */
+  async workDirs(): Promise<WorkDirEntry[]> {
+    const entries: WorkDirEntry[] = [];
+    for (const name of await readdir(this.derivedDir).catch(() => [])) {
+      const match = WORK_DIR_NAME.exec(name);
+      if (!match) {
+        continue;
+      }
+      const modifiedAt = await stat(path.join(this.derivedDir, name)).then(
+        ({ mtime }) => mtime,
+        () => null,
+      );
+      if (modifiedAt) {
+        entries.push({ fileId: match[1], attempt: Number(match[2]), modifiedAt });
+      }
+    }
+    return entries;
+  }
+
+  /** Removes a work directory with everything in it; idempotent. */
+  removeWorkDir(fileId: string, attempt: number): Promise<void> {
+    return rm(this.workDirOf(fileId, attempt), { recursive: true, force: true, maxRetries: 3 });
   }
 
   /** Removes the data file and its tus metadata; idempotent. */

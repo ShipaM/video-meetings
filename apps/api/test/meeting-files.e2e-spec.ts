@@ -206,8 +206,9 @@ describe('Meeting files (e2e)', () => {
         mimeType: 'video/mp4',
         kind: 'VIDEO',
         size: data.length,
-        status: 'READY',
       });
+      // Completed: a recording is transcribed in the background (see the transcription suite).
+      expect(file?.status).not.toBe('UPLOADING');
     });
 
     it('rejects a chunk sent at a wrong offset (409)', async () => {
@@ -286,7 +287,8 @@ describe('Meeting files (e2e)', () => {
       const file = (await listFiles(ownerToken, meetingId)).find(
         (item) => item.id === fileIdOf(location),
       );
-      expect(file).toMatchObject({ status: 'READY', size: data.length });
+      expect(file).toMatchObject({ size: data.length });
+      expect(file?.status).not.toBe('UPLOADING');
     });
 
     it('rejects writing to a completed upload (409)', async () => {
@@ -461,11 +463,13 @@ describe('Meeting files (e2e)', () => {
     });
 
     it('keeps other types an attachment even when inline is asked', async () => {
-      const location = await upload(ownerToken, meetingId, fakeMp4(1024), 'call.mp4');
+      // Recordings are served inline for the player (meeting-file-transcription.e2e-spec.ts).
+      const data = Buffer.from('Meeting notes\n', 'utf8');
+      const location = await upload(ownerToken, meetingId, data, 'notes.txt', 'text/plain');
 
       const link = await requestLink(ownerToken, meetingId, fileIdOf(location)).expect(201);
       const res = await download(`${(link.body as LinkBody).url}&disposition=inline`).expect(200);
-      expect(res.headers['content-disposition']).toBe('attachment; filename="call.mp4"');
+      expect(res.headers['content-disposition']).toBe('attachment; filename="notes.txt"');
       expect(res.headers['accept-ranges']).toBe('bytes');
 
       const listed = await listFiles(ownerToken, meetingId);
@@ -665,7 +669,8 @@ describe('Meeting files (e2e)', () => {
       await cleanUp();
 
       const file = (await listFiles(ownerToken, meetingId)).find((item) => item.id === fileId);
-      expect(file).toMatchObject({ status: 'READY', size: data.length });
+      expect(file).toMatchObject({ size: data.length });
+      expect(file?.status).not.toBe('UPLOADING');
       expect(await storedEntries(fileId)).toContain(fileId);
     });
   });

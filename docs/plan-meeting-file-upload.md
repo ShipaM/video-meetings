@@ -8,8 +8,9 @@
 - **AI processing** is decided: transcription and summarization run locally on the API server (whisper.cpp and a
   local LLM through Ollama, see [research-meeting-upload.md](research-meeting-upload.md)), so no meeting content
   leaves the server. They stay behind `Transcriber` / `Summarizer` interfaces with a fake implementation for tests.
-- **Maximum recording length** is not decided. The plan makes it a configurable limit (`MAX_RECORDING_MINUTES`);
-  the default value must be agreed before Phase 9 is closed, based on the measured local transcription speed.
+- **Maximum recording length** is a configurable limit (`MAX_RECORDING_MINUTES`). The default is **180 minutes**
+  (agreed in Phase 9), from the measured speed: whisper.cpp `small.en` transcribes in about 0.7 x the duration on
+  the dev laptop's CPU, so the longest recording takes about 2 hours.
 
 ## Implementation phases
 
@@ -154,14 +155,14 @@ rules.
 **Affects:** backend / database
 **Tasks**
 
-- [ ] Duration check with the configurable `MAX_RECORDING_MINUTES`; a longer recording ends in `FAILED` with a reason
+- [x] Duration check with the configurable `MAX_RECORDING_MINUTES`; a longer recording ends in `FAILED` with a reason
       naming the limit.
-- [ ] `Transcriber` interface with a fake for tests and a local whisper.cpp adapter (`whisper-cli` run as a child
+- [x] `Transcriber` interface with a fake for tests and a local whisper.cpp adapter (`whisper-cli` run as a child
       process, one recording at a time, timeout derived from the duration); audio track extracted with `ffmpeg`;
       transcript segments with timestamps stored, then summarized with `Summarizer`.
-- [ ] File details return the transcript segments and summary; deletion removes them too.
-- [ ] Signed media URL supports HTTP `Range` requests so the browser player can seek and stream.
-- [ ] e2e tests first with fakes: MP3 and MP4 to `READY` with transcript and summary, over-limit to `FAILED`, transcriber
+- [x] File details return the transcript segments and summary; deletion removes them too.
+- [x] Signed media URL supports HTTP `Range` requests so the browser player can seek and stream.
+- [x] e2e tests first with fakes: MP3 and MP4 to `READY` with transcript and summary, over-limit to `FAILED`, transcriber
       failure to `FAILED` then retry to `READY`, `Range` responses; update `apps/api/CLAUDE.md`.
       **Done when:** the e2e suites are green and a real MP3 and MP4 reach `READY` with an English transcript and a
       summary through the local whisper.cpp and Ollama models.

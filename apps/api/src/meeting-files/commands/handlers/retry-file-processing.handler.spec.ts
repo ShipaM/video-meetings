@@ -45,15 +45,33 @@ describe('RetryFileProcessingHandler', () => {
   });
 
   it('starts a new attempt of a FAILED document and queues it in the same transaction', async () => {
-    await expect(run()).resolves.toMatchObject({ id: 'f1', status: 'PROCESSING', summary: null });
+    await expect(run()).resolves.toMatchObject({
+      id: 'f1',
+      status: 'PROCESSING',
+      summary: null,
+      transcript: null,
+    });
 
     expect(execute).toHaveBeenCalledWith(new GetMeetingQuery('u1', 'm1', 'manage'));
     expect(updateManyAndReturn).toHaveBeenCalledWith({
-      where: { id: 'f1', meetingId: 'm1', status: 'FAILED', kind: 'DOCUMENT' },
+      where: {
+        id: 'f1',
+        meetingId: 'm1',
+        status: 'FAILED',
+        kind: { in: ['DOCUMENT', 'AUDIO', 'VIDEO'] },
+      },
       data: { status: 'PROCESSING', failureReason: null, processingAttempt: { increment: 1 } },
     });
-    expect(queue).toHaveBeenCalledWith(tx, 'f1', 3);
+    expect(queue).toHaveBeenCalledWith(tx, 'DOCUMENT', 'f1', 3);
     expect(findFirst).not.toHaveBeenCalled();
+  });
+
+  it('queues a failed recording on the queue of its kind', async () => {
+    updateManyAndReturn.mockResolvedValue([{ ...retried, kind: 'VIDEO', mimeType: 'video/mp4' }]);
+
+    await expect(run()).resolves.toMatchObject({ kind: 'VIDEO', transcript: null });
+
+    expect(queue).toHaveBeenCalledWith(tx, 'VIDEO', 'f1', 3);
   });
 
   it('fails as a whole when the job cannot be queued (the file stays FAILED)', async () => {

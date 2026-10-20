@@ -18,8 +18,8 @@ import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import type { AuthenticatedRequest } from '../auth/jwt-auth.guard.js';
 import { DeleteMeetingFileCommand, RetryFileProcessingCommand } from './commands/index.js';
-import { INLINE_MIME_TYPES } from './meeting-files.config.js';
-import type { FileLink, MeetingFileDetails } from './meeting-files.types.js';
+import { INLINE_MIME_TYPES, PLAYABLE_MIME_TYPES } from './meeting-files.config.js';
+import type { FileLink, MeetingFileDetails, MeetingFileListItem } from './meeting-files.types.js';
 import {
   GetFileContentQuery,
   GetFileLinkQuery,
@@ -39,7 +39,7 @@ export class MeetingFilesController {
   list(
     @Req() { user }: AuthenticatedRequest,
     @Param('id', ParseUUIDPipe) meetingId: string,
-  ): Promise<MeetingFileDetails[]> {
+  ): Promise<MeetingFileListItem[]> {
     return this.queryBus.execute(new ListMeetingFilesQuery(user.id, meetingId));
   }
 
@@ -87,9 +87,10 @@ export class MeetingFilesController {
   }
 
   /**
-   * Streams a file for a signed link (no bearer token: `<a download>`, `<img>` and `<iframe>`
-   * cannot send one). `res.sendFile` handles Range, ETag and conditional requests.
-   * `disposition=inline` serves a PDF or an image for a preview; anything else downloads.
+   * Streams a file for a signed link (no bearer token: `<a download>`, `<img>`, `<iframe>`,
+   * `<audio>` and `<video>` cannot send one). `res.sendFile` handles Range, ETag and conditional
+   * requests. `disposition=inline` serves a PDF or an image for a preview and a recording for the
+   * player; anything else downloads.
    */
   @Get('files/:fileId/content')
   async content(
@@ -102,8 +103,9 @@ export class MeetingFilesController {
 
     // Sets `Content-Disposition: attachment` with an RFC 5987 `filename*` for non-ASCII names.
     res.attachment(file.originalName);
-    const inline = disposition === 'inline' && INLINE_MIME_TYPES.includes(file.mimeType);
-    if (inline) {
+    const preview = disposition === 'inline' && INLINE_MIME_TYPES.includes(file.mimeType);
+    const playback = disposition === 'inline' && PLAYABLE_MIME_TYPES.includes(file.mimeType);
+    if (preview || playback) {
       // Same header with the inline type: the file name is kept for "Save as".
       res.set(
         'Content-Disposition',
@@ -116,7 +118,8 @@ export class MeetingFilesController {
         {
           // A preview gets the whole file in one response: the token is checked when a request
           // starts, so a PDF viewer asking for more ranges after the 5 minutes would get 401.
-          acceptRanges: !inline,
+          // A player needs ranges to seek; its link lives as long as the recording plays.
+          acceptRanges: !preview,
           headers: {
             'Content-Type': file.mimeType,
             'X-Content-Type-Options': 'nosniff',
@@ -125,11 +128,19 @@ export class MeetingFilesController {
             'Referrer-Policy': 'no-referrer',
           },
         },
-        (error) => {
-          if (error && !res.headersSent) {
-            reject(new NotFoundException('File not found'));
-          } else {
+        (error?: Error & { status?: number; headers?: Record<string, string> }) => {
+          if (!error || res.headersSent) {
             resolve();
+          } else if (error.status === 416 || error.status === 412) {
+            // A range past the end (with `Content-Range: bytes */size`) or a failed precondition
+            // is the client's mistake, not a missing file.
+            res
+              .status(error.status)
+              .set(error.headers ?? {})
+              .end();
+            resolve();
+          } else {
+            reject(new NotFoundException('File not found'));
           }
         },
       );

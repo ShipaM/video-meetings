@@ -11,7 +11,7 @@ import { FailStuckProcessingCommand } from './../src/meeting-files/commands/inde
 import { FakeSummarizer } from './../src/meeting-files/processing/fake-summarizer.js';
 import { Summarizer } from './../src/meeting-files/processing/summarizer.js';
 import { PrismaService } from './../src/prisma/prisma.service.js';
-import { TUS_VERSION, fakeMp4, fakePng, tusMetadata } from './tus.helpers.js';
+import { TUS_VERSION, fakePng, tusMetadata } from './tus.helpers.js';
 
 interface FileDetails {
   id: string;
@@ -33,7 +33,6 @@ const MIME = {
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   png: 'image/png',
-  mp4: 'video/mp4',
 } as const;
 
 describe('Meeting file processing (e2e)', () => {
@@ -163,7 +162,7 @@ describe('Meeting file processing (e2e)', () => {
   });
 
   afterEach(() => {
-    summarizer.reset();
+    summarizer.control.reset();
   });
 
   afterAll(async () => {
@@ -179,7 +178,7 @@ describe('Meeting file processing (e2e)', () => {
     it.each(['notes.txt', 'notes.pdf', 'notes.docx', 'slides.pptx'])(
       'summarizes %s in the background: PROCESSING, then READY with a summary',
       async (name) => {
-        const release = summarizer.hold();
+        const release = summarizer.control.hold();
         const fileId = await uploadFixture(ownerToken, meetingId, name);
 
         // The upload request does not wait for the summary.
@@ -195,7 +194,7 @@ describe('Meeting file processing (e2e)', () => {
     );
 
     it('lists a document with its status, and with its summary once it is READY', async () => {
-      const release = summarizer.hold();
+      const release = summarizer.control.hold();
       const fileId = await uploadFixture(ownerToken, meetingId, 'notes.txt');
       const listed = async () => {
         const res = await request(server())
@@ -219,7 +218,7 @@ describe('Meeting file processing (e2e)', () => {
     });
 
     it('fails with a reason when the summary cannot be generated', async () => {
-      summarizer.behave('fail');
+      summarizer.control.behave('fail');
       const fileId = await uploadFixture(ownerToken, meetingId, 'notes.txt');
 
       const file = await settled(ownerToken, meetingId, fileId);
@@ -247,7 +246,7 @@ describe('Meeting file processing (e2e)', () => {
     });
 
     it('fails with a reason when processing hangs past the job timeout', async () => {
-      summarizer.behave('hang');
+      summarizer.control.behave('hang');
       const fileId = await uploadFixture(ownerToken, meetingId, 'notes.txt');
 
       const file = await settled(ownerToken, meetingId, fileId);
@@ -261,14 +260,7 @@ describe('Meeting file processing (e2e)', () => {
 
       const file = (await details(ownerToken, meetingId, fileId).expect(200)).body as FileDetails;
       expect(file).toMatchObject({ kind: 'IMAGE', status: 'READY', summary: null });
-      expect(summarizer.calls).toBe(0);
-    });
-
-    it('keeps recordings READY at once until they are transcribed (Phase 9)', async () => {
-      const fileId = await upload(ownerToken, meetingId, fakeMp4(4096), 'call.mp4', MIME.mp4);
-
-      const file = (await details(ownerToken, meetingId, fileId).expect(200)).body as FileDetails;
-      expect(file).toMatchObject({ kind: 'VIDEO', status: 'READY', summary: null });
+      expect(summarizer.control.calls).toBe(0);
     });
   });
 
@@ -309,11 +301,11 @@ describe('Meeting file processing (e2e)', () => {
 
   describe('POST /meetings/:id/files/:fileId/retry', () => {
     it('processes a failed document again, to READY with a summary', async () => {
-      summarizer.behave('fail');
+      summarizer.control.behave('fail');
       const fileId = await uploadFixture(ownerToken, meetingId, 'notes.docx');
       expect(await settled(ownerToken, meetingId, fileId)).toMatchObject({ status: 'FAILED' });
 
-      summarizer.behave('ok');
+      summarizer.control.behave('ok');
       const res = await retry(ownerToken, meetingId, fileId).expect(202);
       expect(res.body).toMatchObject({ id: fileId, status: 'PROCESSING', failureReason: null });
 
@@ -332,7 +324,7 @@ describe('Meeting file processing (e2e)', () => {
     });
 
     it('answers 403 to a participant and 404 to a stranger or for a missing file', async () => {
-      summarizer.behave('fail');
+      summarizer.control.behave('fail');
       const fileId = await uploadFixture(ownerToken, meetingId, 'notes.txt');
       await settled(ownerToken, meetingId, fileId);
 
@@ -347,9 +339,9 @@ describe('Meeting file processing (e2e)', () => {
 
   describe('deleting a file during processing', () => {
     it('removes it, and the finishing job does not bring it or its summary back', async () => {
-      const release = summarizer.hold();
+      const release = summarizer.control.hold();
       const fileId = await uploadFixture(ownerToken, meetingId, 'notes.txt');
-      await summarizer.started();
+      await summarizer.control.started();
 
       await request(server())
         .delete(`/meetings/${meetingId}/files/${fileId}`)
@@ -358,7 +350,7 @@ describe('Meeting file processing (e2e)', () => {
 
       // The job finishes its summary after the file is gone.
       release();
-      await summarizer.finished();
+      await summarizer.control.finished();
       await new Promise((resolve) => setTimeout(resolve, 500));
 
       const prisma = app.get(PrismaService);

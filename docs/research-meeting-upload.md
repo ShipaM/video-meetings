@@ -438,7 +438,7 @@ by `EventSource`), so they are not worth it at this scale.
 ```bash
 FILES_DIR=./storage              # absolute or relative to apps/api; never served statically
 FILE_LINK_SECRET=change-me       # signs download/media tokens (separate from JWT_SECRET)
-MAX_RECORDING_MINUTES=180        # default to be agreed (open question)
+MAX_RECORDING_MINUTES=180        # agreed default (Phase 9)
 AI_PROVIDER=fake                 # fake | local
 FFMPEG_PATH=                     # optional, defaults to ffmpeg-static / PATH
 FFPROBE_PATH=
@@ -465,7 +465,7 @@ OLLAMA_NUM_CTX=16384
 | Local CPU is slow: files wait long in `PROCESSING`            | One recording job at a time, documents in parallel; smaller model; GPU build (CUDA/Vulkan) later. |
 | Local LLM summary quality is lower than a cloud model         | Compare models on real meetings before fixing `OLLAMA_MODEL`; map-reduce for long input.          |
 | Windows dev: a file still open by a stream cannot be unlinked | Delete after the response stream closes; cleanup jobs retry on `EBUSY` / `EPERM`.                 |
-| `MAX_RECORDING_MINUTES` default                               | Must be agreed before Phase 9 (plan); derive it from the measured transcription speed.            |
+| `MAX_RECORDING_MINUTES` default                               | Agreed: 180 minutes (Phase 9), from the measured speed of `small.en` (about 0.7 x the duration).  |
 
 ## Sources
 
