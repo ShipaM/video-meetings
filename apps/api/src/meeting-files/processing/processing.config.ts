@@ -1,8 +1,14 @@
+import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import path from 'node:path';
 import { numberEnv } from '../../config/env.js';
 
 /** Background processing settings, read from the environment (see `.env.example`). */
 
-/** `local`: summaries by the local Ollama model; `fake`: a deterministic stand-in (tests, dev). */
+/**
+ * `local`: transcripts by whisper.cpp and summaries by the local Ollama model; `fake`:
+ * deterministic stand-ins (tests, dev).
+ */
 export type AiProvider = 'fake' | 'local';
 
 export function aiProvider(): AiProvider {
@@ -46,6 +52,82 @@ export function ollamaSettings(): OllamaSettings {
   };
 }
 
+/** Recordings longer than this many minutes are not transcribed (`MAX_RECORDING_MINUTES`). */
+export function maxRecordingMinutes(): number {
+  return numberEnv('MAX_RECORDING_MINUTES', 180);
+}
+
+/** Probing a recording and extracting its audio, before the transcription starts. */
+export const RECORDING_PREPARE_TIMEOUT_MS = 15 * 60 * 1000;
+
+/**
+ * Longest the transcriber may take for a recording of `durationMs`: the duration times
+ * `WHISPER_SPEED_FACTOR` (measured transcription time / audio time, with a safety margin) plus
+ * `TRANSCRIPTION_TIMEOUT_MARGIN_SECONDS` for loading the model.
+ */
+export function transcriptionTimeoutMs(durationMs: number): number {
+  const factor = numberEnv('WHISPER_SPEED_FACTOR', 1.5);
+  const margin = numberEnv('TRANSCRIPTION_TIMEOUT_MARGIN_SECONDS', 300, 0) * 1000;
+  return Math.ceil(durationMs * factor + margin);
+}
+
+/** pg-boss never lets a job run longer than this. */
+const MAX_JOB_EXPIRATION_SECONDS = 24 * 60 * 60;
+
+/**
+ * pg-boss expiration of a recording job: every stage of the longest allowed recording (prepare,
+ * transcription, summary) plus a minute. The stages' own timeouts fire first; this only frees a
+ * job whose worker died.
+ */
+export function recordingJobExpirationSeconds(): number {
+  const longestMs =
+    RECORDING_PREPARE_TIMEOUT_MS +
+    transcriptionTimeoutMs(maxRecordingMinutes() * 60 * 1000) +
+    documentJobTimeoutMs();
+  return Math.min(Math.ceil(longestMs / 1000) + 60, MAX_JOB_EXPIRATION_SECONDS);
+}
+
+const require = createRequire(import.meta.url);
+
+/** The ffmpeg binary: `FFMPEG_PATH`, else the one `ffmpeg-static` installed, else `PATH`. */
+export function ffmpegPath(): string {
+  // `null` on a platform the package has no binary for.
+  return process.env.FFMPEG_PATH || (require('ffmpeg-static') as string | null) || 'ffmpeg';
+}
+
+/** The ffprobe binary: `FFPROBE_PATH`, else the one `@ffprobe-installer` installed, else `PATH`. */
+export function ffprobePath(): string {
+  if (process.env.FFPROBE_PATH) {
+    return process.env.FFPROBE_PATH;
+  }
+  try {
+    // Loaded on demand: the package throws on a platform it has no binary for.
+    return (require('@ffprobe-installer/ffprobe') as { path: string }).path;
+  } catch {
+    return 'ffprobe';
+  }
+}
+
+export interface WhisperSettings {
+  cliPath: string;
+  modelPath: string;
+  threads: number;
+}
+
+/** whisper.cpp settings for `AI_PROVIDER=local`; a missing model file fails at startup. */
+export function whisperSettings(): WhisperSettings {
+  const modelsDir = path.resolve(process.env.WHISPER_MODELS_DIR || './models');
+  const modelPath = path.join(modelsDir, `ggml-${process.env.WHISPER_MODEL || 'small.en'}.bin`);
+  if (!existsSync(modelPath)) {
+    throw new Error(`Whisper model not found at ${modelPath} (needed with AI_PROVIDER=local)`);
+  }
+  return {
+    cliPath: process.env.WHISPER_CLI_PATH || 'whisper-cli',
+    modelPath,
+    threads: numberEnv('WHISPER_THREADS', 4, 1),
+  };
+}
+
 /** Extracted text beyond this many characters is cut (zip bombs, huge documents). */
 export const MAX_EXTRACTED_CHARS = 2_000_000;
 
@@ -55,4 +137,12 @@ export const FAILURE_REASONS = {
   timeout: 'Processing took too long',
   interrupted: 'Processing was interrupted',
   unexpected: 'Processing failed',
+  unreadableRecording: 'The recording could not be read',
+  noAudio: 'No audio found in the recording',
+  noSpeech: 'No speech found in the recording',
+  transcription: 'The recording could not be transcribed',
 } as const;
+
+/** Failure reason of a recording over `MAX_RECORDING_MINUTES`. */
+export const tooLongReason = (minutes: number): string =>
+  `Recording is longer than ${minutes} minute${minutes === 1 ? '' : 's'}`;

@@ -8,9 +8,11 @@ describe('SweepOrphanFilesHandler', () => {
   const findMany = vi.fn();
   const storedEntries = vi.fn();
   const removeQuietly = vi.fn();
+  const workDirs = vi.fn();
+  const removeWorkDir = vi.fn();
   const handler = new SweepOrphanFilesHandler(
     { meetingFile: { findMany } } as unknown as PrismaService,
-    { storedEntries, removeQuietly } as unknown as FilesStorageService,
+    { storedEntries, removeQuietly, workDirs, removeWorkDir } as unknown as FilesStorageService,
   );
 
   const olderThan = new Date('2026-01-01T12:00:00.000Z');
@@ -22,6 +24,10 @@ describe('SweepOrphanFilesHandler', () => {
     storedEntries.mockReset();
     removeQuietly.mockReset();
     removeQuietly.mockResolvedValue(true);
+    workDirs.mockReset();
+    workDirs.mockResolvedValue([]);
+    removeWorkDir.mockReset();
+    removeWorkDir.mockResolvedValue(undefined);
   });
 
   it('defaults to files older than the grace period', () => {
@@ -64,5 +70,33 @@ describe('SweepOrphanFilesHandler', () => {
     await expect(handler.execute(new SweepOrphanFilesCommand(olderThan))).resolves.toBe(0);
 
     expect(findMany).not.toHaveBeenCalled();
+  });
+
+  it('removes old work directories, except those of files still PROCESSING', async () => {
+    storedEntries.mockResolvedValue([]);
+    workDirs.mockResolvedValue([
+      { fileId: 'left-behind', modifiedAt: old },
+      { fileId: 'running', modifiedAt: old },
+      { fileId: 'fresh', modifiedAt: recent },
+    ]);
+    findMany.mockResolvedValue([{ id: 'running' }]);
+
+    await expect(handler.execute(new SweepOrphanFilesCommand(olderThan))).resolves.toBe(1);
+
+    expect(findMany).toHaveBeenCalledWith({
+      where: { id: { in: ['left-behind', 'running'] }, status: 'PROCESSING' },
+      select: { id: true },
+    });
+    expect(removeWorkDir).toHaveBeenCalledTimes(1);
+    expect(removeWorkDir).toHaveBeenCalledWith('left-behind');
+  });
+
+  it('does not count a work directory it could not remove', async () => {
+    storedEntries.mockResolvedValue([]);
+    workDirs.mockResolvedValue([{ fileId: 'left-behind', modifiedAt: old }]);
+    findMany.mockResolvedValue([]);
+    removeWorkDir.mockRejectedValue(new Error('EBUSY'));
+
+    await expect(handler.execute(new SweepOrphanFilesCommand(olderThan))).resolves.toBe(0);
   });
 });

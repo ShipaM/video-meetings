@@ -3,7 +3,7 @@ import { CommandHandler, ICommandHandler, QueryBus } from '@nestjs/cqrs';
 import { GetMeetingQuery } from '../../../meetings/index.js';
 import { PrismaService } from '../../../prisma/prisma.service.js';
 import { type MeetingFileDetails, toMeetingFileDetails } from '../../meeting-files.types.js';
-import { ProcessingQueue } from '../../processing/processing-queue.js';
+import { PROCESSED_KINDS, ProcessingQueue } from '../../processing/processing-queue.js';
 import { RetryFileProcessingCommand } from '../retry-file-processing.command.js';
 
 @CommandHandler(RetryFileProcessingCommand)
@@ -23,14 +23,14 @@ export class RetryFileProcessingHandler implements ICommandHandler<RetryFileProc
     await this.queryBus.execute(new GetMeetingQuery(userId, meetingId, 'manage'));
 
     // A new attempt and its job commit together. The update is conditional, so two retries at
-    // once start one attempt; only documents are processed so far (recordings: Phase 9).
+    // once start one attempt; images are never processed, so they cannot fail.
     const retried = await this.prisma.$transaction(async (tx) => {
       const [processing] = await tx.meetingFile.updateManyAndReturn({
-        where: { id: fileId, meetingId, status: 'FAILED', kind: 'DOCUMENT' },
+        where: { id: fileId, meetingId, status: 'FAILED', kind: { in: [...PROCESSED_KINDS] } },
         data: { status: 'PROCESSING', failureReason: null, processingAttempt: { increment: 1 } },
       });
       if (processing) {
-        await this.processing.queue(tx, fileId, processing.processingAttempt);
+        await this.processing.queue(tx, processing.kind, fileId, processing.processingAttempt);
       }
       return processing;
     });
@@ -42,10 +42,10 @@ export class RetryFileProcessingHandler implements ICommandHandler<RetryFileProc
         select: { id: true },
       });
       throw file
-        ? new ConflictException('Only failed documents can be retried')
+        ? new ConflictException('Only failed documents and recordings can be retried')
         : new NotFoundException('File not found');
     }
-    // A FAILED file has no summary: the summary is only stored together with READY.
-    return toMeetingFileDetails({ ...retried, summary: null });
+    // A FAILED file has no results: they are only stored together with READY.
+    return toMeetingFileDetails({ ...retried, summary: null, transcript: [] });
   }
 }

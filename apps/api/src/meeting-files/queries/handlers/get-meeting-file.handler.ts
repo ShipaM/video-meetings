@@ -19,7 +19,7 @@ export class GetMeetingFileHandler implements IQueryHandler<GetMeetingFileQuery>
     // An upload in progress is not a file yet, as in the list.
     const file = await this.prisma.meetingFile.findFirst({
       where: { id: fileId, meetingId, status: { not: 'UPLOADING' } },
-      include: { summary: true },
+      include: { summary: true, transcript: { orderBy: { position: 'asc' } } },
     });
     if (!file) {
       throw new NotFoundException('File not found');

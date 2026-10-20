@@ -1,6 +1,7 @@
-// Check of document processing against a running API (Phase 7 "done when"): uploads documents
-// with tus-js-client, waits until each leaves PROCESSING and prints its status and summary. Run
-// the API with AI_PROVIDER=local to go through the real model. Not part of the e2e run (slow).
+// Check of background processing against a running API (Phase 7 and 9 "done when"): uploads
+// documents and recordings with tus-js-client, waits until each leaves PROCESSING and prints its
+// status, summary and, for a recording, duration and transcript. Run the API with
+// AI_PROVIDER=local to go through whisper.cpp and the Ollama model. Not part of the e2e run (slow).
 //
 // Usage (from apps/api, with the API running):
 //   node scripts/processing-check.mjs [file ...]   (default: the four fixtures in test/fixtures)
@@ -26,6 +27,18 @@ const MIME = {
   '.pdf': 'application/pdf',
   '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.mp3': 'audio/mpeg',
+  '.m4a': 'audio/mp4',
+  '.wav': 'audio/wav',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+  '.mov': 'video/quicktime',
+};
+
+/** `mm:ss` of a transcript timestamp. */
+const clock = (ms) => {
+  const seconds = Math.floor(ms / 1000);
+  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
 };
 
 const api = process.env.API_URL ?? 'http://localhost:4000';
@@ -58,7 +71,7 @@ async function signIn() {
 async function upload(token, meetingId, filePath) {
   const filetype = MIME[path.extname(filePath).toLowerCase()];
   if (!filetype) {
-    throw new Error(`Not a document type this check knows: ${filePath}`);
+    throw new Error(`Not a file type this check knows: ${filePath}`);
   }
   const { size } = await stat(filePath);
   return new Promise((resolve, reject) => {
@@ -102,7 +115,17 @@ for (const filePath of files) {
   const file = await settled(token, meeting.id, fileId);
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
   console.log(`\n== ${file.originalName}: ${file.status} after ${seconds} s`);
+  if (file.durationMs !== null) {
+    console.log(`Duration: ${(file.durationMs / 1000).toFixed(1)} s`);
+  }
   if (file.status === 'READY' && file.summary) {
+    if (file.transcript) {
+      console.log(`Transcript (${file.transcript.length} segments):`);
+      for (const { startMs, endMs, text } of file.transcript) {
+        console.log(`  [${clock(startMs)} - ${clock(endMs)}] ${text}`);
+      }
+      console.log('Summary:');
+    }
     console.log(file.summary);
   } else {
     failed += 1;
@@ -113,4 +136,4 @@ for (const filePath of files) {
 if (failed > 0) {
   throw new Error(`${failed} of ${files.length} file(s) did not reach READY with a summary`);
 }
-console.log(`\nOK: ${files.length} document(s) reached READY with a summary.`);
+console.log(`\nOK: ${files.length} file(s) reached READY with a summary.`);

@@ -6,6 +6,8 @@ import { resolveFilesDir } from './meeting-files.config.js';
 
 /** Storage keys are file ids (UUIDs); anything else in the directory is not ours to remove. */
 const STORED_NAME = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(\.json)?$/;
+/** Work directories are named after their file id. */
+const WORK_DIR_NAME = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
  * Removes a data file and its tus metadata (`<key>.json`, the `FileStore` default). Idempotent:
@@ -34,19 +36,56 @@ export interface StoredEntry {
   modifiedAt: Date;
 }
 
+/** A job's work directory found on disk. */
+export interface WorkDirEntry {
+  fileId: string;
+  modifiedAt: Date;
+}
+
 /**
  * Local disk storage of meeting files. tus writes uploads in place into `FILES_DIR/uploads/<key>`
  * (plus a `<key>.json` metadata sidecar); the completed data file stays there as the original.
+ * Processing jobs keep temporary files (a recording's extracted audio) in
+ * `FILES_DIR/derived/<fileId>`, removed when the job ends.
  */
 @Injectable()
 export class FilesStorageService {
   private readonly logger = new Logger(FilesStorageService.name);
   readonly root = resolveFilesDir();
   readonly uploadsDir = path.join(this.root, 'uploads');
+  readonly derivedDir = path.join(this.root, 'derived');
   readonly store: FileStore = new MeetingFileStore({ directory: this.uploadsDir });
 
   pathOf(storageKey: string): string {
     return path.join(this.uploadsDir, storageKey);
+  }
+
+  /** The work directory of a processing job for the file (not created here). */
+  workDirOf(fileId: string): string {
+    return path.join(this.derivedDir, fileId);
+  }
+
+  /** Every work directory on disk with its modification time. */
+  async workDirs(): Promise<WorkDirEntry[]> {
+    const entries: WorkDirEntry[] = [];
+    for (const name of await readdir(this.derivedDir).catch(() => [])) {
+      if (!WORK_DIR_NAME.test(name)) {
+        continue;
+      }
+      const modifiedAt = await stat(path.join(this.derivedDir, name)).then(
+        ({ mtime }) => mtime,
+        () => null,
+      );
+      if (modifiedAt) {
+        entries.push({ fileId: name, modifiedAt });
+      }
+    }
+    return entries;
+  }
+
+  /** Removes a work directory with everything in it; idempotent. */
+  removeWorkDir(fileId: string): Promise<void> {
+    return rm(this.workDirOf(fileId), { recursive: true, force: true, maxRetries: 3 });
   }
 
   /** Removes the data file and its tus metadata; idempotent. */

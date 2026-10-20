@@ -1,4 +1,4 @@
-import type { MeetingFile } from '../generated/prisma/client.js';
+import type { MeetingFile, TranscriptSegment } from '../generated/prisma/client.js';
 import type { MeetingFileKind, MeetingFileStatus } from '../generated/prisma/enums.js';
 import { INLINE_MIME_TYPES } from './meeting-files.config.js';
 
@@ -15,6 +15,8 @@ export interface MeetingFileView {
   failureReason: string | null;
   /** Whether a link serves the file inline (`disposition=inline`), so a page can preview it. */
   previewable: boolean;
+  /** Length of a recording once its processing has probed it, else `null`. */
+  durationMs: number | null;
   uploadedById: string;
   createdAt: Date;
   completedAt: Date | null;
@@ -30,20 +32,48 @@ export const toMeetingFileView = (file: MeetingFile): MeetingFileView => ({
   status: file.status,
   failureReason: file.failureReason,
   previewable: INLINE_MIME_TYPES.includes(file.mimeType),
+  durationMs: file.durationMs,
   uploadedById: file.uploadedById,
   createdAt: file.createdAt,
   completedAt: file.completedAt,
 });
 
-/** A file with the result of its processing (`GET /meetings/:id/files/:fileId`). */
-export interface MeetingFileDetails extends MeetingFileView {
-  /** Set once a document is `READY`; `null` before, on failure and for other kinds. */
+/** A file with its summary, as listed (`GET /meetings/:id/files`). */
+export interface MeetingFileListItem extends MeetingFileView {
+  /** Set once a document or a recording is `READY`; `null` before, on failure and for images. */
   summary: string | null;
 }
 
-export const toMeetingFileDetails = (
+export const toMeetingFileListItem = (
   file: MeetingFile & { summary: { text: string } | null },
-): MeetingFileDetails => ({ ...toMeetingFileView(file), summary: file.summary?.text ?? null });
+): MeetingFileListItem => ({ ...toMeetingFileView(file), summary: file.summary?.text ?? null });
+
+/** A timed piece of a recording's transcript. */
+export interface TranscriptSegmentView {
+  startMs: number;
+  endMs: number;
+  text: string;
+}
+
+/** A file with all results of its processing (`GET /meetings/:id/files/:fileId`). */
+export interface MeetingFileDetails extends MeetingFileListItem {
+  /**
+   * The transcript once a recording is `READY` (in the order of `file.transcript`, which the query
+   * sorts by position); `null` before, on failure and for other kinds. Only in the details: a long
+   * meeting has thousands of segments.
+   */
+  transcript: TranscriptSegmentView[] | null;
+}
+
+export const toMeetingFileDetails = (
+  file: MeetingFile & { summary: { text: string } | null; transcript: TranscriptSegment[] },
+): MeetingFileDetails => ({
+  ...toMeetingFileListItem(file),
+  transcript:
+    file.status === 'READY' && (file.kind === 'AUDIO' || file.kind === 'VIDEO')
+      ? file.transcript.map(({ startMs, endMs, text }) => ({ startMs, endMs, text }))
+      : null,
+});
 
 /** A signed link to `GET /files/:fileId/content`, relative to the API base URL. */
 export interface FileLink {

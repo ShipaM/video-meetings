@@ -6,6 +6,7 @@ import { fileLinkSecret } from './meeting-files.config.js';
 import { MeetingFilesController } from './meeting-files.controller.js';
 import { ProcessingQueue } from './processing/processing-queue.js';
 import { SummarizerProvider } from './processing/summarizer.provider.js';
+import { TranscriberProvider } from './processing/transcriber.provider.js';
 import { QueryHandlers } from './queries/index.js';
 import { StorageMaintenanceWorker } from './storage-maintenance.worker.js';
 import { TusService } from './tus.service.js';
@@ -18,6 +19,7 @@ import { UploadsController } from './uploads.controller.js';
     FilesStorageService,
     TusService,
     SummarizerProvider,
+    TranscriberProvider,
     ProcessingQueue,
     StorageMaintenanceWorker,
     ...CommandHandlers,

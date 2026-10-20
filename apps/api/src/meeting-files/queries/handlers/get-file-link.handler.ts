@@ -7,6 +7,7 @@ import {
   FILE_LINK_AUDIENCE,
   FILE_LINK_TTL_SECONDS,
   fileLinkSecret,
+  mediaLinkTtlSeconds,
 } from '../../meeting-files.config.js';
 import type { FileLink, FileLinkPayload } from '../../meeting-files.types.js';
 import { GetFileLinkQuery } from '../get-file-link.query.js';
@@ -30,15 +31,18 @@ export class GetFileLinkHandler implements IQueryHandler<GetFileLinkQuery> {
       throw new NotFoundException('File not found');
     }
 
+    // A recording is played and seeks long after the link was issued.
+    const recording = file.kind === 'AUDIO' || file.kind === 'VIDEO';
+    const ttlSeconds = recording ? mediaLinkTtlSeconds(file.durationMs) : FILE_LINK_TTL_SECONDS;
     const payload: FileLinkPayload = { sub: userId, fileId };
     const token = await this.jwt.signAsync(payload, {
       secret: fileLinkSecret(),
       audience: FILE_LINK_AUDIENCE,
-      expiresIn: FILE_LINK_TTL_SECONDS,
+      expiresIn: ttlSeconds,
     });
     return {
       url: `/files/${fileId}/content?token=${encodeURIComponent(token)}`,
-      expiresAt: new Date(Date.now() + FILE_LINK_TTL_SECONDS * 1000),
+      expiresAt: new Date(Date.now() + ttlSeconds * 1000),
     };
   }
 }
