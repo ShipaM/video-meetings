@@ -71,20 +71,39 @@ export function transcriptionTimeoutMs(durationMs: number): number {
   return Math.ceil(durationMs * factor + margin);
 }
 
+/**
+ * Longest the summary of a transcript of `durationMs` may take: the document budget
+ * (`DOCUMENT_PROCESSING_TIMEOUT_SECONDS`) for every started hour, since a long transcript is
+ * summarized in parts and then combined.
+ */
+export function transcriptSummaryTimeoutMs(durationMs: number): number {
+  return documentJobTimeoutMs() * Math.max(1, Math.ceil(durationMs / (60 * 60 * 1000)));
+}
+
 /** pg-boss never lets a job run longer than this. */
 const MAX_JOB_EXPIRATION_SECONDS = 24 * 60 * 60;
 
 /**
  * pg-boss expiration of a recording job: every stage of the longest allowed recording (prepare,
  * transcription, summary) plus a minute. The stages' own timeouts fire first; this only frees a
- * job whose worker died.
+ * job whose worker died. A limit whose stages cannot fit into pg-boss's 24 hours is refused (at
+ * startup, where the queue is created), instead of jobs expiring in the middle of a transcription.
  */
 export function recordingJobExpirationSeconds(): number {
+  const longestRecordingMs = maxRecordingMinutes() * 60 * 1000;
   const longestMs =
     RECORDING_PREPARE_TIMEOUT_MS +
-    transcriptionTimeoutMs(maxRecordingMinutes() * 60 * 1000) +
-    documentJobTimeoutMs();
-  return Math.min(Math.ceil(longestMs / 1000) + 60, MAX_JOB_EXPIRATION_SECONDS);
+    transcriptionTimeoutMs(longestRecordingMs) +
+    transcriptSummaryTimeoutMs(longestRecordingMs);
+  const seconds = Math.ceil(longestMs / 1000) + 60;
+  if (seconds > MAX_JOB_EXPIRATION_SECONDS) {
+    const hours = (seconds / 3600).toFixed(1);
+    throw new Error(
+      `MAX_RECORDING_MINUTES=${maxRecordingMinutes()} needs recording jobs of up to ${hours} h ` +
+        '(with WHISPER_SPEED_FACTOR and the timeouts), but pg-boss allows 24 h; lower the limit',
+    );
+  }
+  return seconds;
 }
 
 const require = createRequire(import.meta.url);

@@ -3,6 +3,7 @@ import { IQueryHandler, QueryBus, QueryHandler } from '@nestjs/cqrs';
 import { JwtService } from '@nestjs/jwt';
 import { GetMeetingQuery } from '../../../meetings/index.js';
 import { PrismaService } from '../../../prisma/prisma.service.js';
+import { isRecording } from '../../file-types.js';
 import {
   FILE_LINK_AUDIENCE,
   FILE_LINK_TTL_SECONDS,
@@ -32,8 +33,9 @@ export class GetFileLinkHandler implements IQueryHandler<GetFileLinkQuery> {
     }
 
     // A recording is played and seeks long after the link was issued.
-    const recording = file.kind === 'AUDIO' || file.kind === 'VIDEO';
-    const ttlSeconds = recording ? mediaLinkTtlSeconds(file.durationMs) : FILE_LINK_TTL_SECONDS;
+    const ttlSeconds = isRecording(file.kind)
+      ? mediaLinkTtlSeconds(file.durationMs)
+      : FILE_LINK_TTL_SECONDS;
     const payload: FileLinkPayload = { sub: userId, fileId };
     const token = await this.jwt.signAsync(payload, {
       secret: fileLinkSecret(),

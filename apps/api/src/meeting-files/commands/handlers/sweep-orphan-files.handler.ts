@@ -42,28 +42,37 @@ export class SweepOrphanFilesHandler implements ICommandHandler<SweepOrphanFiles
   }
 
   /**
-   * Work directories a job left behind (a crash, a failed removal). One whose file is still
-   * `PROCESSING` may belong to a running job, which clears it when it ends.
+   * Work directories a job left behind (a crash, a failed removal). The directory of the attempt a
+   * file is `PROCESSING` with may belong to a running job, which clears it when it ends; every
+   * other attempt's directory is stale, and a retry never reuses it (it gets a new attempt).
    */
   private async sweepWorkDirs(olderThan: Date): Promise<number> {
-    const candidates = (await this.storage.workDirs())
-      .filter(({ modifiedAt }) => modifiedAt < olderThan)
-      .map(({ fileId }) => fileId);
+    const candidates = (await this.storage.workDirs()).filter(
+      ({ modifiedAt }) => modifiedAt < olderThan,
+    );
     if (candidates.length === 0) {
       return 0;
     }
-    const busy = await this.prisma.meetingFile.findMany({
-      where: { id: { in: candidates }, status: 'PROCESSING' },
-      select: { id: true },
+    const running = await this.prisma.meetingFile.findMany({
+      where: {
+        id: { in: [...new Set(candidates.map(({ fileId }) => fileId))] },
+        status: 'PROCESSING',
+      },
+      select: { id: true, processingAttempt: true },
     });
-    const busyIds = new Set(busy.map(({ id }) => id));
+    const busy = new Set(running.map(({ id, processingAttempt }) => `${id}.${processingAttempt}`));
     let removed = 0;
-    for (const fileId of candidates.filter((id) => !busyIds.has(id))) {
+    for (const { fileId, attempt } of candidates) {
+      if (busy.has(`${fileId}.${attempt}`)) {
+        continue;
+      }
       try {
-        await this.storage.removeWorkDir(fileId);
+        await this.storage.removeWorkDir(fileId, attempt);
         removed += 1;
       } catch (error) {
-        this.logger.warn(`Could not remove the work directory of ${fileId}: ${String(error)}`);
+        this.logger.warn(
+          `Could not remove the work directory of ${fileId} (attempt ${attempt}): ${String(error)}`,
+        );
       }
     }
     return removed;

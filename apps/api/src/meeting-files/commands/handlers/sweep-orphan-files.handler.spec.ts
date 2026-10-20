@@ -72,28 +72,31 @@ describe('SweepOrphanFilesHandler', () => {
     expect(findMany).not.toHaveBeenCalled();
   });
 
-  it('removes old work directories, except those of files still PROCESSING', async () => {
+  it('removes old work directories, except the one of the attempt still PROCESSING', async () => {
     storedEntries.mockResolvedValue([]);
     workDirs.mockResolvedValue([
-      { fileId: 'left-behind', modifiedAt: old },
-      { fileId: 'running', modifiedAt: old },
-      { fileId: 'fresh', modifiedAt: recent },
+      { fileId: 'left-behind', attempt: 1, modifiedAt: old },
+      { fileId: 'running', attempt: 3, modifiedAt: old },
+      // A stale attempt of a file that a retry has started again.
+      { fileId: 'running', attempt: 2, modifiedAt: old },
+      { fileId: 'fresh', attempt: 1, modifiedAt: recent },
     ]);
-    findMany.mockResolvedValue([{ id: 'running' }]);
+    findMany.mockResolvedValue([{ id: 'running', processingAttempt: 3 }]);
 
-    await expect(handler.execute(new SweepOrphanFilesCommand(olderThan))).resolves.toBe(1);
+    await expect(handler.execute(new SweepOrphanFilesCommand(olderThan))).resolves.toBe(2);
 
     expect(findMany).toHaveBeenCalledWith({
       where: { id: { in: ['left-behind', 'running'] }, status: 'PROCESSING' },
-      select: { id: true },
+      select: { id: true, processingAttempt: true },
     });
-    expect(removeWorkDir).toHaveBeenCalledTimes(1);
-    expect(removeWorkDir).toHaveBeenCalledWith('left-behind');
+    expect(removeWorkDir).toHaveBeenCalledTimes(2);
+    expect(removeWorkDir).toHaveBeenCalledWith('left-behind', 1);
+    expect(removeWorkDir).toHaveBeenCalledWith('running', 2);
   });
 
   it('does not count a work directory it could not remove', async () => {
     storedEntries.mockResolvedValue([]);
-    workDirs.mockResolvedValue([{ fileId: 'left-behind', modifiedAt: old }]);
+    workDirs.mockResolvedValue([{ fileId: 'left-behind', attempt: 1, modifiedAt: old }]);
     findMany.mockResolvedValue([]);
     removeWorkDir.mockRejectedValue(new Error('EBUSY'));
 

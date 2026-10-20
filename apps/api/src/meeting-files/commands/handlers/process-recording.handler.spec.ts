@@ -22,6 +22,8 @@ describe('ProcessRecordingHandler', () => {
   const deleteSegments = vi.fn();
   const createSegments = vi.fn();
   const upsert = vi.fn();
+  const findSegments = vi.fn();
+  const transaction = vi.fn();
   const transcribe = vi.fn();
   const summarize = vi.fn();
   const probe = vi.mocked(probeMedia);
@@ -35,14 +37,15 @@ describe('ProcessRecordingHandler', () => {
   };
   const storage = {
     pathOf: (key: string) => path.join(root, 'uploads', key),
-    workDirOf: (id: string) => path.join(root, 'derived', id),
-    removeWorkDir: (id: string) =>
-      rm(path.join(root, 'derived', id), { recursive: true, force: true }),
+    workDirOf: (id: string, attempt: number) => path.join(root, 'derived', `${id}.${attempt}`),
+    removeWorkDir: (id: string, attempt: number) =>
+      rm(path.join(root, 'derived', `${id}.${attempt}`), { recursive: true, force: true }),
   };
   const handler = new ProcessRecordingHandler(
     {
       meetingFile: { findFirst, updateMany },
-      $transaction: (run: (client: typeof tx) => Promise<unknown>) => run(tx),
+      transcriptSegment: { findMany: findSegments },
+      $transaction: transaction,
     } as unknown as PrismaService,
     storage as unknown as FilesStorageService,
     { transcribe },
@@ -50,7 +53,13 @@ describe('ProcessRecordingHandler', () => {
   );
 
   const current = { id: 'f1', status: 'PROCESSING', processingAttempt: 2 };
-  const file = { ...current, storageKey: 'f1', kind: 'VIDEO', mimeType: 'video/mp4' };
+  const file = {
+    ...current,
+    storageKey: 'f1',
+    kind: 'VIDEO',
+    mimeType: 'video/mp4',
+    durationMs: null,
+  };
   const pieces = [
     { startMs: 0, endMs: 1500, text: 'Ship on Friday.' },
     { startMs: 1500, endMs: 3000, text: 'Mark fixes the bug.' },
@@ -77,16 +86,18 @@ describe('ProcessRecordingHandler', () => {
     findFirst.mockResolvedValue(file);
     updateMany.mockResolvedValue({ count: 1 });
     txUpdateMany.mockResolvedValue({ count: 1 });
+    findSegments.mockResolvedValue([]);
+    transaction.mockImplementation((work: (client: typeof tx) => Promise<unknown>) => work(tx));
     probe.mockResolvedValue({ durationMs: 3000, hasAudio: true });
     extract.mockResolvedValue(3000);
     transcribe.mockResolvedValue(pieces);
     summarize.mockResolvedValue('- Ship on Friday');
   });
 
-  it('stores the transcript and its summary and marks the file READY', async () => {
+  it('stores the transcript, then its summary, and marks the file READY', async () => {
     await run();
 
-    const workDir = path.join(root, 'derived', 'f1');
+    const workDir = path.join(root, 'derived', 'f1.2');
     const audio = path.join(workDir, 'audio.wav');
     expect(probe).toHaveBeenCalledWith(path.join(root, 'uploads', 'f1'), expect.any(AbortSignal));
     expect(extract).toHaveBeenCalledWith(
@@ -101,10 +112,13 @@ describe('ProcessRecordingHandler', () => {
       expect.any(AbortSignal),
       'transcript',
     );
-    expect(txUpdateMany).toHaveBeenCalledWith({
+    // The transcript is stored first (kept if the summary fails), then the status and summary.
+    expect(txUpdateMany).toHaveBeenNthCalledWith(1, { where: current, data: { durationMs: 3000 } });
+    expect(txUpdateMany).toHaveBeenNthCalledWith(2, {
       where: current,
-      data: { status: 'READY', failureReason: null, durationMs: 3000 },
+      data: { status: 'READY', failureReason: null },
     });
+    expect(transaction).toHaveBeenCalledWith(expect.any(Function), { timeout: 60_000 });
     expect(deleteSegments).toHaveBeenCalledWith({ where: { fileId: 'f1' } });
     expect(createSegments).toHaveBeenCalledWith({
       data: [
@@ -206,12 +220,56 @@ describe('ProcessRecordingHandler', () => {
     expect(await readdir(path.join(root, 'derived'))).toEqual([]);
   });
 
-  it('fails with "Summary could not be generated" when the model fails', async () => {
+  it('fails with "Summary could not be generated" when the model fails, keeping the transcript', async () => {
     summarize.mockRejectedValue(new SummaryError('model down'));
 
     await run();
 
     failedWith('Summary could not be generated');
+    expect(createSegments).toHaveBeenCalledTimes(1);
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it('reuses a stored transcript: only the summary is made again', async () => {
+    findFirst.mockResolvedValue({ ...file, durationMs: 3000 });
+    findSegments.mockResolvedValue(pieces);
+
+    await run();
+
+    expect(findSegments).toHaveBeenCalledWith({
+      where: { fileId: 'f1' },
+      orderBy: { position: 'asc' },
+      select: { startMs: true, endMs: true, text: true },
+    });
+    expect(probe).not.toHaveBeenCalled();
+    expect(transcribe).not.toHaveBeenCalled();
+    expect(createSegments).not.toHaveBeenCalled();
+    expect(summarize).toHaveBeenCalledWith(
+      'Ship on Friday.\nMark fixes the bug.',
+      expect.any(AbortSignal),
+      'transcript',
+    );
+    expect(txUpdateMany).toHaveBeenCalledWith({
+      where: current,
+      data: { status: 'READY', failureReason: null },
+    });
+    expect(upsert).toHaveBeenCalled();
+  });
+
+  it('does not call a failure after a finished stage a timeout', async () => {
+    // A 20 ms summary budget: the summary itself ignores it and ends after its timer has fired,
+    // then the final write fails for another reason.
+    vi.stubEnv('DOCUMENT_PROCESSING_TIMEOUT_SECONDS', '0.02');
+    summarize.mockImplementation(
+      () => new Promise((resolve) => setTimeout(() => resolve('- Ship on Friday'), 100)),
+    );
+    transaction
+      .mockImplementationOnce((work: (client: typeof tx) => Promise<unknown>) => work(tx))
+      .mockRejectedValueOnce(new Error('Transaction already closed'));
+
+    await run();
+
+    failedWith('Processing failed');
   });
 
   it('fails with a generic reason for an unexpected error', async () => {

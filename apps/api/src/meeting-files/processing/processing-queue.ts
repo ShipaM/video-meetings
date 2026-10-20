@@ -5,6 +5,7 @@ import type { Prisma } from '../../generated/prisma/client.js';
 import type { MeetingFileKind } from '../../generated/prisma/enums.js';
 import { jobsPollingIntervalSeconds } from '../../jobs/jobs.config.js';
 import { JobsService } from '../../jobs/jobs.service.js';
+import { RECORDING_KINDS, isRecording } from '../file-types.js';
 import { ProcessDocumentCommand } from '../commands/process-document.command.js';
 import { ProcessRecordingCommand } from '../commands/process-recording.command.js';
 import { documentJobTimeoutMs, recordingJobExpirationSeconds } from './processing.config.js';
@@ -13,7 +14,7 @@ export const PROCESS_DOCUMENT_QUEUE = 'process-document';
 export const PROCESS_RECORDING_QUEUE = 'process-recording';
 
 /** Kinds that are processed in the background; any other kind is `READY` once uploaded. */
-export const PROCESSED_KINDS: readonly MeetingFileKind[] = ['DOCUMENT', 'AUDIO', 'VIDEO'];
+export const PROCESSED_KINDS: readonly MeetingFileKind[] = ['DOCUMENT', ...RECORDING_KINDS];
 
 /** Payload of a processing job: the file and the processing attempt it was sent for. */
 export interface ProcessFileJob {
@@ -24,10 +25,16 @@ export interface ProcessFileJob {
 /** Job states in which a job will still run (or is running). */
 const LIVE_STATES = new Set(['created', 'retry', 'active']);
 
-const QUEUES = [PROCESS_DOCUMENT_QUEUE, PROCESS_RECORDING_QUEUE];
-
-const queueOf = (kind: MeetingFileKind): string =>
-  kind === 'DOCUMENT' ? PROCESS_DOCUMENT_QUEUE : PROCESS_RECORDING_QUEUE;
+/** The queue of a processed kind; any other kind is a programming error, not a silent no-op. */
+function queueOf(kind: MeetingFileKind): string {
+  if (kind === 'DOCUMENT') {
+    return PROCESS_DOCUMENT_QUEUE;
+  }
+  if (isRecording(kind)) {
+    return PROCESS_RECORDING_QUEUE;
+  }
+  throw new Error(`Files of kind ${kind} are not processed`);
+}
 
 /** Lets pg-boss write its job through a Prisma transaction, so it commits with the status. */
 const transactionDb = (tx: Prisma.TransactionClient): Db => ({
@@ -106,16 +113,14 @@ export class ProcessingQueue implements OnApplicationBootstrap {
     });
   }
 
-  /** Whether a job for `attempt` of the file is still queued, running or waiting for a retry. */
-  async hasLiveJob(fileId: string, attempt: number): Promise<boolean> {
-    for (const queue of QUEUES) {
-      const jobs = await this.jobs.boss.findJobs<ProcessFileJob>(queue, {
-        data: { fileId, attempt },
-      });
-      if (jobs.some((job) => LIVE_STATES.has(job.state))) {
-        return true;
-      }
-    }
-    return false;
+  /**
+   * Whether a job for `attempt` of the file is still queued, running or waiting for a retry, in
+   * the queue of its kind.
+   */
+  async hasLiveJob(kind: MeetingFileKind, fileId: string, attempt: number): Promise<boolean> {
+    const jobs = await this.jobs.boss.findJobs<ProcessFileJob>(queueOf(kind), {
+      data: { fileId, attempt },
+    });
+    return jobs.some((job) => LIVE_STATES.has(job.state));
   }
 }

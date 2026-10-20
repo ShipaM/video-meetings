@@ -1,6 +1,7 @@
 import type { MeetingFile, TranscriptSegment } from '../generated/prisma/client.js';
 import type { MeetingFileKind, MeetingFileStatus } from '../generated/prisma/enums.js';
-import { INLINE_MIME_TYPES } from './meeting-files.config.js';
+import { isRecording } from './file-types.js';
+import { INLINE_MIME_TYPES, PLAYABLE_MIME_TYPES } from './meeting-files.config.js';
 
 /** A meeting file as returned by the API (the storage key stays internal). */
 export interface MeetingFileView {
@@ -13,8 +14,15 @@ export interface MeetingFileView {
   size: number;
   status: MeetingFileStatus;
   failureReason: string | null;
-  /** Whether a link serves the file inline (`disposition=inline`), so a page can preview it. */
+  /**
+   * Whether a link serves the file inline (`disposition=inline`) as a whole, so a page can preview
+   * it (PDF, PNG, JPEG).
+   */
   previewable: boolean;
+  /**
+   * Whether a link serves the file inline with byte ranges, for the page's audio or video player.
+   */
+  playable: boolean;
   /** Length of a recording once its processing has probed it, else `null`. */
   durationMs: number | null;
   uploadedById: string;
@@ -32,6 +40,7 @@ export const toMeetingFileView = (file: MeetingFile): MeetingFileView => ({
   status: file.status,
   failureReason: file.failureReason,
   previewable: INLINE_MIME_TYPES.includes(file.mimeType),
+  playable: PLAYABLE_MIME_TYPES.includes(file.mimeType),
   durationMs: file.durationMs,
   uploadedById: file.uploadedById,
   createdAt: file.createdAt,
@@ -69,8 +78,9 @@ export const toMeetingFileDetails = (
   file: MeetingFile & { summary: { text: string } | null; transcript: TranscriptSegment[] },
 ): MeetingFileDetails => ({
   ...toMeetingFileListItem(file),
+  // Segments are kept after a failed summary (for the retry), so READY decides.
   transcript:
-    file.status === 'READY' && (file.kind === 'AUDIO' || file.kind === 'VIDEO')
+    file.status === 'READY' && isRecording(file.kind) && file.transcript.length > 0
       ? file.transcript.map(({ startMs, endMs, text }) => ({ startMs, endMs, text }))
       : null,
 });

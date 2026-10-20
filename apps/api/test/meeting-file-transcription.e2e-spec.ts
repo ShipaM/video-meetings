@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { Server } from 'node:http';
@@ -108,10 +108,10 @@ describe('Meeting file transcription (e2e)', () => {
     }
   };
 
-  const workDirExists = (fileId: string) =>
-    stat(path.join(filesDir, 'derived', fileId)).then(
-      () => true,
-      () => false,
+  /** Whether any work directory of the file (`derived/<fileId>.<attempt>`) is left. */
+  const workDirExists = async (fileId: string) =>
+    (await readdir(path.join(filesDir, 'derived')).catch(() => [])).some((name) =>
+      name.startsWith(`${fileId}.`),
     );
 
   let ownerToken: string;
@@ -203,6 +203,9 @@ describe('Meeting file transcription (e2e)', () => {
         const processing = (await details(ownerToken, meetingId, fileId).expect(200))
           .body as FileDetails;
         expect(processing).toMatchObject({ status: 'PROCESSING', transcript: null, summary: null });
+        // The extracted audio waits in the job's work directory while it is transcribed.
+        await transcriber.control.started();
+        expect(await workDirExists(fileId)).toBe(true);
 
         release();
         const file = await settled(ownerToken, meetingId, fileId);
@@ -230,7 +233,13 @@ describe('Meeting file transcription (e2e)', () => {
         .set(auth(ownerToken))
         .expect(200);
       const listed = (res.body as FileDetails[]).find((file) => file.id === fileId);
-      expect(listed).toMatchObject({ kind: 'AUDIO', status: 'READY' });
+      // Served inline with ranges for the player, not as a preview.
+      expect(listed).toMatchObject({
+        kind: 'AUDIO',
+        status: 'READY',
+        playable: true,
+        previewable: false,
+      });
       expect(listed?.durationMs).toBeGreaterThan(2_800);
       expect(listed?.summary).toContain('Fake speech 1.');
       expect(listed).not.toHaveProperty('transcript');
@@ -292,7 +301,7 @@ describe('Meeting file transcription (e2e)', () => {
       expect(await workDirExists(fileId)).toBe(false);
     });
 
-    it('fails when the transcript cannot be summarized', async () => {
+    it('fails when the transcript cannot be summarized; a retry reuses the transcript', async () => {
       summarizer.control.behave('fail');
       const fileId = await uploadRecording(ownerToken, meetingId, 'call.mp3');
 
@@ -302,6 +311,16 @@ describe('Meeting file transcription (e2e)', () => {
         failureReason: 'Summary could not be generated',
         transcript: null,
       });
+
+      transcriber.control.reset();
+      summarizer.control.behave('ok');
+      await retry(ownerToken, meetingId, fileId).expect(202);
+      const ready = await settled(ownerToken, meetingId, fileId);
+      expect(ready).toMatchObject({ status: 'READY' });
+      expect(ready.transcript).toHaveLength(3);
+      expect(ready.summary).toContain('Fake speech 1.');
+      // Only the summary was made again.
+      expect(transcriber.control.calls).toBe(0);
     });
   });
 

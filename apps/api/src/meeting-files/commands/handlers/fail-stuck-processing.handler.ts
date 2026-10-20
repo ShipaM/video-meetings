@@ -17,13 +17,13 @@ export class FailStuckProcessingHandler implements ICommandHandler<FailStuckProc
   async execute({ cutoff }: FailStuckProcessingCommand): Promise<number> {
     const candidates = await this.prisma.meetingFile.findMany({
       where: { status: 'PROCESSING', updatedAt: { lt: cutoff } },
-      select: { id: true, processingAttempt: true },
+      select: { id: true, kind: true, processingAttempt: true },
     });
 
     let failed = 0;
-    for (const { id, processingAttempt } of candidates) {
+    for (const { id, kind, processingAttempt } of candidates) {
       // Queued, running or waiting for a retry: not stuck, however long the queue is.
-      if (await this.processing.hasLiveJob(id, processingAttempt)) {
+      if (await this.processing.hasLiveJob(kind, id, processingAttempt)) {
         continue;
       }
       // Conditional on the attempt: a retry started meanwhile is not touched.
