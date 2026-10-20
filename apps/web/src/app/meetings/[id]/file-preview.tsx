@@ -1,52 +1,56 @@
 'use client';
 
 import { Button, Skeleton } from '@heroui/react';
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { MeetingFile } from '../../meetings';
 import {
-  FILE_LINK_REFRESH_MARGIN_MS,
+  FILE_LINK_REUSE_MS,
+  POPUP_BLOCKED_MESSAGE,
   PREVIEW_FAILED_MESSAGE,
-  PREVIEW_MIME_TYPES,
-  SUMMARY_CLAMP_CHARACTERS,
+  THUMBNAIL_ROOT_MARGIN,
 } from './constants';
 import { type FileLink, inlineUrl, requestFileLink } from './files-api';
 
-/** Whether the API serves this file inline, so the page can show it (PDF, PNG, JPEG). */
-export function canPreview(file: MeetingFile): boolean {
-  return PREVIEW_MIME_TYPES.includes(file.mimeType);
-}
-
 /**
- * A signed link to the file for previews, requested on `load()` and reused until shortly before it
- * expires (links live 5 minutes). Overlapping `load()` calls send one request.
+ * A signed link to the file for previews. `load()` reuses the current link while it is young
+ * enough and otherwise asks for a new one (`force` always does); overlapping calls send one
+ * request. A failed request drops the old link, so an expired one is never shown with the error.
  */
 export function useFileLink(meetingId: string, fileId: string) {
   const [link, setLink] = useState<FileLink | null>(null);
   const [error, setError] = useState<string | null>(null);
   const linkRef = useRef<FileLink | null>(null);
-  const pending = useRef<Promise<void> | null>(null);
+  const pending = useRef<Promise<FileLink | null> | null>(null);
 
-  const load = useCallback((): Promise<void> => {
-    const current = linkRef.current;
-    if (current && current.expiresAt - Date.now() > FILE_LINK_REFRESH_MARGIN_MS) {
-      return Promise.resolve();
-    }
-    pending.current ??= (async () => {
-      setError(null);
-      const result = await requestFileLink({ meetingId, id: fileId }, PREVIEW_FAILED_MESSAGE);
-      pending.current = null;
-      if (result.type === 'link') {
-        linkRef.current = result.link;
-        setLink(result.link);
-      } else if (result.type === 'error') {
-        setError(result.message);
+  const load = useCallback(
+    (force = false): Promise<FileLink | null> => {
+      const current = linkRef.current;
+      if (!force && current && performance.now() - current.receivedAt < FILE_LINK_REUSE_MS) {
+        return Promise.resolve(current);
       }
-    })();
-    return pending.current;
-  }, [meetingId, fileId]);
+      pending.current ??= (async () => {
+        setError(null);
+        const result = await requestFileLink({ meetingId, id: fileId }, PREVIEW_FAILED_MESSAGE);
+        pending.current = null;
+        if (result.type === 'link') {
+          linkRef.current = result.link;
+          setLink(result.link);
+          return result.link;
+        }
+        linkRef.current = null;
+        setLink(null);
+        if (result.type === 'error') setError(result.message);
+        return null;
+      })();
+      return pending.current;
+    },
+    [meetingId, fileId],
+  );
 
   return { link, error, load };
 }
+
+export type FileLinkState = ReturnType<typeof useFileLink>;
 
 function ImageIcon() {
   return (
@@ -68,25 +72,51 @@ function ImageIcon() {
 }
 
 /**
- * A small square thumbnail of an image file. Mouse users can click it to toggle the preview;
- * keyboard and screen reader users have the row's Preview button, so it is hidden from them.
+ * A small square thumbnail of an image file. It asks for its link only once the row comes near
+ * the viewport. Mouse users can click it to toggle the preview; keyboard and screen reader users
+ * have the row's Preview button, so it is hidden from them.
  */
 export function ImageThumbnail({
   name,
-  link,
-  error,
+  preview,
   onPress,
 }: {
   name: string;
-  link: FileLink | null;
-  error: string | null;
+  preview: FileLinkState;
   onPress: () => void;
 }) {
+  const { link, error, load } = preview;
+  const button = useRef<HTMLButtonElement>(null);
+  // The thumbnail keeps the first link that worked: a newer link (for the preview) would make it
+  // download the original again (responses are `no-store`). A broken one takes the next link.
+  const [shown, setShown] = useState<FileLink | null>(null);
   const [isBroken, setIsBroken] = useState(false);
-  const showImage = link !== null && !isBroken;
+  if (link !== null && link !== shown && (shown === null || isBroken)) {
+    setShown(link);
+    setIsBroken(false);
+  }
+
+  useEffect(() => {
+    const element = button.current;
+    if (!element) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          observer.disconnect();
+          void load();
+        }
+      },
+      { rootMargin: THUMBNAIL_ROOT_MARGIN },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [load]);
+
+  const showImage = shown !== null && !isBroken;
 
   return (
     <button
+      ref={button}
       type="button"
       tabIndex={-1}
       aria-hidden="true"
@@ -98,16 +128,18 @@ export function ImageThumbnail({
         // A signed, short-lived API URL: next/image cannot optimise it.
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={inlineUrl(link)}
+          src={inlineUrl(shown)}
           alt=""
+          loading="lazy"
+          decoding="async"
           className="size-full object-cover"
           onError={() => setIsBroken(true)}
         />
       )}
-      {!showImage && link === null && error === null && (
+      {!showImage && error === null && !isBroken && (
         <Skeleton className="absolute inset-0 rounded-none" />
       )}
-      {!showImage && (link !== null || error !== null) && <ImageIcon />}
+      {!showImage && (error !== null || isBroken) && <ImageIcon />}
     </button>
   );
 }
@@ -116,88 +148,139 @@ export function ImageThumbnail({
 export function FilePreviewPanel({
   id,
   file,
-  link,
-  error,
-  onRetry,
+  preview,
 }: {
   id: string;
   file: MeetingFile;
-  link: FileLink | null;
-  error: string | null;
-  onRetry: () => void;
+  preview: FileLinkState;
 }) {
+  const { link, error, load } = preview;
+  // The link whose image failed to load (expired, file gone); a new link clears it.
+  const [failedLink, setFailedLink] = useState<FileLink | null>(null);
+  const [openError, setOpenError] = useState<string | null>(null);
+  const shownError =
+    error ?? (link !== null && link === failedLink ? PREVIEW_FAILED_MESSAGE : null);
   const isPdf = file.mimeType === 'application/pdf';
-  // Mobile browsers (e.g. Chrome on Android) have no built-in PDF viewer: an iframe would only
-  // start a download there, so they get the "open" link alone.
-  const hasPdfViewer = typeof navigator !== 'undefined' && navigator.pdfViewerEnabled;
+  // Mobile browsers without a PDF viewer (e.g. Chrome on Android) report `false`: an iframe would
+  // only start a download there. Older desktop browsers lack the property and can show PDFs.
+  const hasPdfViewer = typeof navigator === 'undefined' || navigator.pdfViewerEnabled !== false;
+
+  async function openInNewTab() {
+    setOpenError(null);
+    // Opened while handling the click, so it is not blocked as a pop-up; it gets the URL once a
+    // link that is still valid is there.
+    const tab = window.open('', '_blank');
+    if (!tab) {
+      setOpenError(POPUP_BLOCKED_MESSAGE);
+      return;
+    }
+    tab.opener = null;
+    const fresh = await load();
+    if (fresh) {
+      tab.location.href = inlineUrl(fresh);
+    } else {
+      tab.close(); // the panel shows the error
+    }
+  }
 
   return (
     <div id={id} className="border-default flex flex-col gap-3 rounded-xl border p-3">
-      {error !== null && (
+      {shownError !== null && (
         <div className="flex flex-wrap items-center gap-3">
           <p role="alert" className="text-danger flex-1 text-sm">
-            {error}
+            {shownError}
           </p>
-          <Button size="sm" variant="secondary" className="min-h-11 sm:min-h-9" onPress={onRetry}>
+          <Button
+            size="sm"
+            variant="secondary"
+            className="min-h-11 sm:min-h-9"
+            onPress={() => void load(true)}
+          >
             Try again
           </Button>
         </div>
       )}
-      {error === null && link === null && (
+      {shownError === null && link === null && (
         <Skeleton
           className="h-64 rounded-lg sm:h-96"
           aria-busy="true"
           aria-label={`Loading the preview of ${file.originalName}`}
         />
       )}
-      {link !== null && !isPdf && (
+      {shownError === null && link !== null && !isPdf && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={inlineUrl(link)}
           alt={`Preview of ${file.originalName}`}
           className="mx-auto max-h-[70vh] max-w-full rounded-lg object-contain"
+          onError={() => setFailedLink(link)}
         />
       )}
-      {link !== null && isPdf && hasPdfViewer && (
+      {shownError === null && link !== null && isPdf && hasPdfViewer && (
+        // The API sends a preview whole (no byte ranges), so the viewer has all of it before the
+        // short-lived link expires.
         <iframe
           src={inlineUrl(link)}
           title={`Preview of ${file.originalName}`}
           className="h-[70vh] min-h-80 w-full rounded-lg bg-white"
         />
       )}
-      {link !== null && isPdf && !hasPdfViewer && (
+      {shownError === null && link !== null && isPdf && !hasPdfViewer && (
         <p className="text-muted text-sm">This browser cannot show PDF files inside the page.</p>
       )}
-      {link !== null && (
-        <a
-          href={inlineUrl(link)}
-          target="_blank"
-          rel="noreferrer noopener"
-          className="text-accent w-fit text-sm font-medium underline-offset-4 hover:underline"
-        >
-          Open in a new tab
-        </a>
+      {shownError === null && link !== null && (
+        <div className="flex flex-col gap-1">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-accent -ml-2 min-h-11 w-fit sm:min-h-8"
+            onPress={() => void openInNewTab()}
+          >
+            Open in a new tab
+          </Button>
+          {openError !== null && (
+            <p role="alert" className="text-danger text-sm">
+              {openError}
+            </p>
+          )}
+        </div>
       )}
     </div>
   );
 }
 
-/** The summary of a processed document; a long one is clamped with "Show more". */
+/**
+ * The summary of a processed document, clamped to four lines. "Show more" appears only when the
+ * clamp actually hides text, measured on the rendered paragraph (it follows resizes).
+ */
 export function FileSummary({ summary }: { summary: string }) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isClamped, setIsClamped] = useState(false);
+  const text = useRef<HTMLParagraphElement>(null);
   const textId = useId();
-  const isLong = summary.length > SUMMARY_CLAMP_CHARACTERS;
+
+  useLayoutEffect(() => {
+    const element = text.current;
+    if (!element || isExpanded) return;
+    // The observer also reports once right after `observe`, which gives the first measurement.
+    const observer = new ResizeObserver(() =>
+      setIsClamped(element.scrollHeight > element.clientHeight + 1),
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [summary, isExpanded]);
 
   return (
     <div className="bg-surface-secondary/60 flex flex-col gap-1 rounded-xl px-3 py-2">
       <p className="text-muted text-xs font-medium tracking-wide uppercase">Summary</p>
       <p
+        ref={text}
         id={textId}
-        className={`text-sm leading-relaxed whitespace-pre-line ${isLong && !isExpanded ? 'line-clamp-4' : ''}`}
+        className={`text-sm leading-relaxed whitespace-pre-line ${isExpanded ? '' : 'line-clamp-4'}`}
       >
         {summary}
       </p>
-      {isLong && (
+      {(isExpanded || isClamped) && (
         <Button
           size="sm"
           variant="ghost"
@@ -211,13 +294,4 @@ export function FileSummary({ summary }: { summary: string }) {
       )}
     </div>
   );
-}
-
-/** Requests the link once an image row mounts, so its thumbnail shows right away. */
-export function useImageThumbnailLink(file: MeetingFile, load: () => Promise<void>) {
-  const isImage = file.kind === 'IMAGE' && canPreview(file);
-  useEffect(() => {
-    if (isImage) void load();
-  }, [isImage, load]);
-  return isImage;
 }

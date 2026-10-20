@@ -4,15 +4,8 @@ import { AlertDialog, Button, Chip, Spinner } from '@heroui/react';
 import { useEffect, useId, useRef, useState } from 'react';
 import { clearAccessToken } from '../../auth-storage';
 import { formatFileSize, formatMeetingDate, type MeetingFile } from '../../meetings';
-import { FILE_KIND_LABEL, FILE_STATUS } from './constants';
-import {
-  FilePreviewPanel,
-  FileSummary,
-  ImageThumbnail,
-  canPreview,
-  useFileLink,
-  useImageThumbnailLink,
-} from './file-preview';
+import { ANNOUNCEMENT_RESET_MS, FILE_KIND_LABEL, FILE_STATUS } from './constants';
+import { FilePreviewPanel, FileSummary, ImageThumbnail, useFileLink } from './file-preview';
 import { getExtension } from './file-types';
 import { deleteFile, downloadFile, retryProcessing } from './files-api';
 import { UnmountListener } from './unmount-listener';
@@ -119,7 +112,7 @@ function FileRow({ file, actions }: { file: MeetingFile; actions?: FileActions }
   const downloadButton = useRef<HTMLButtonElement>(null);
   const previewId = useId();
   const preview = useFileLink(file.meetingId, file.id);
-  const hasThumbnail = useImageThumbnailLink(file, preview.load);
+  const hasThumbnail = file.kind === 'IMAGE' && file.previewable;
   const status = FILE_STATUS[file.status];
 
   async function handleDownload() {
@@ -158,12 +151,7 @@ function FileRow({ file, actions }: { file: MeetingFile; actions?: FileActions }
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="flex min-w-0 flex-1 items-center gap-3">
           {hasThumbnail && (
-            <ImageThumbnail
-              name={file.originalName}
-              link={preview.link}
-              error={preview.error}
-              onPress={togglePreview}
-            />
+            <ImageThumbnail name={file.originalName} preview={preview} onPress={togglePreview} />
           )}
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <div className="flex flex-wrap items-center gap-2">
@@ -182,7 +170,7 @@ function FileRow({ file, actions }: { file: MeetingFile; actions?: FileActions }
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          {canPreview(file) && (
+          {file.previewable && (
             <Button
               variant="tertiary"
               className={actionButtonClass}
@@ -244,23 +232,22 @@ function FileRow({ file, actions }: { file: MeetingFile; actions?: FileActions }
         </p>
       )}
       {file.status === 'READY' && file.summary !== null && <FileSummary summary={file.summary} />}
-      {isPreviewOpen && (
-        <FilePreviewPanel
-          id={previewId}
-          file={file}
-          link={preview.link}
-          error={preview.error}
-          onRetry={() => void preview.load()}
-        />
-      )}
+      {isPreviewOpen && <FilePreviewPanel id={previewId} file={file} preview={preview} />}
     </li>
   );
 }
 
-/** Announces files that finished processing (one polite, atomic message), without moving focus. */
+/**
+ * Announces files that finished processing (one polite, atomic message), without moving focus.
+ * The region is emptied before each message, so a repeated one (a retry that failed again) is
+ * read out too.
+ */
 function useProcessingAnnouncement(files: MeetingFile[]): string {
   const previous = useRef<Map<string, MeetingFile['status']> | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const [message, setMessage] = useState('');
+
+  useEffect(() => () => clearTimeout(timer.current), []);
 
   useEffect(() => {
     const before = previous.current;
@@ -270,15 +257,16 @@ function useProcessingAnnouncement(files: MeetingFile[]): string {
       (file) => before.get(file.id) === 'PROCESSING' && file.status !== 'PROCESSING',
     );
     if (finished.length === 0) return;
-    setMessage(
-      finished
-        .map((file) =>
-          file.status === 'FAILED'
-            ? `${file.originalName}: processing failed.`
-            : `${file.originalName} is ready.`,
-        )
-        .join(' '),
-    );
+    const text = finished
+      .map((file) =>
+        file.status === 'FAILED'
+          ? `${file.originalName}: processing failed.`
+          : `${file.originalName} is ready.`,
+      )
+      .join(' ');
+    setMessage('');
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setMessage(text), ANNOUNCEMENT_RESET_MS);
   }, [files]);
 
   return message;

@@ -34,6 +34,8 @@ export type MeetingFile = {
   status: MeetingFileStatus;
   /** Short reason of a `FAILED` file, `null` otherwise. */
   failureReason: string | null;
+  /** The API serves it inline (PDF, PNG, JPEG), so the page can preview it. */
+  previewable: boolean;
   /** Summary of a `READY` document, `null` before, on failure and for other kinds. */
   summary: string | null;
   createdAt: string;

@@ -10,8 +10,12 @@ import {
   RETRY_FAILED_MESSAGE,
 } from './constants';
 
-/** A short-lived signed link to a file's content: an absolute URL and its expiry (epoch ms). */
-export type FileLink = { url: string; expiresAt: number };
+/** A short-lived signed link to a file's content: an absolute URL and when it arrived. */
+export type FileLink = {
+  url: string;
+  /** `performance.now()` when the link arrived; its age decides whether it may be reused. */
+  receivedAt: number;
+};
 
 export type FileLinkResult =
   { type: 'link'; link: FileLink } | { type: 'error'; message: string } | { type: 'unauthorized' };
@@ -29,11 +33,8 @@ export async function requestFileLink(
     if (response.status === 404) return { type: 'error', message: FILE_GONE_MESSAGE };
     if (!response.ok) return { type: 'error', message: failedMessage };
 
-    const { url, expiresAt } = (await response.json()) as { url: string; expiresAt: string };
-    return {
-      type: 'link',
-      link: { url: `${API_URL}${url}`, expiresAt: new Date(expiresAt).getTime() },
-    };
+    const { url } = (await response.json()) as { url: string };
+    return { type: 'link', link: { url: `${API_URL}${url}`, receivedAt: performance.now() } };
   } catch {
     return { type: 'error', message: SERVER_UNAVAILABLE_MESSAGE };
   }

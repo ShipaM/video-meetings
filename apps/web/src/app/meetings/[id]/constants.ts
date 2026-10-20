@@ -117,16 +117,20 @@ export const RETRY_CONFLICT_MESSAGE = 'This file is already being processed agai
 export const PROCESSING_POLL_INTERVAL_MS = 3000;
 
 /**
- * Stored types the API serves inline for a preview (`disposition=inline`), mirroring
- * `INLINE_MIME_TYPES` in `apps/api/src/meeting-files/meeting-files.config.ts`.
+ * How long a signed link is reused for previews. API links live 5 minutes; the age is measured on
+ * the page's own monotonic clock (`performance.now()`), so a wrong system clock does not matter.
  */
-export const PREVIEW_MIME_TYPES = ['application/pdf', 'image/png', 'image/jpeg'];
+export const FILE_LINK_REUSE_MS = 4 * 60 * 1000;
 
-/** A cached signed link is requested again when it expires within this time. */
-export const FILE_LINK_REFRESH_MARGIN_MS = 60 * 1000;
+/** Image thumbnails request their link once the row is this close to the viewport. */
+export const THUMBNAIL_ROOT_MARGIN = '200px';
 
-/** Summaries longer than this are clamped to a few lines with "Show more". */
-export const SUMMARY_CLAMP_CHARACTERS = 280;
+/** A repeated announcement is cleared first and set again after this delay, so it is re-read. */
+export const ANNOUNCEMENT_RESET_MS = 100;
+
+/** Shown when a new tab for a preview could not be opened (pop-ups blocked). */
+export const POPUP_BLOCKED_MESSAGE =
+  'The browser blocked the new tab. Allow pop-ups and try again.';
 
 /** Longest wait for the delete dialog's exit animation before the deleted row is removed anyway. */
 export const DIALOG_CLOSE_FALLBACK_MS = 1000;

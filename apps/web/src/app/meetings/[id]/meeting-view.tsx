@@ -75,31 +75,38 @@ async function fetchFiles(token: string, meetingId: string): Promise<FilesResult
 
 /**
  * Reloads the file list every few seconds while `isActive` (a file is `PROCESSING`), so statuses
- * and summaries appear without a manual reload. A hidden tab is not polled; it reloads at once
- * when it becomes visible again. The next poll waits for the previous one.
+ * and summaries appear without a manual reload. One request at a time, the next one an interval
+ * after the previous answer. A hidden tab has no timer at all; it reloads at once when it becomes
+ * visible again, and that reload replaces the pending one.
  */
 function useProcessingPolling(isActive: boolean, refresh: () => Promise<void>) {
   useEffect(() => {
     if (!isActive) return;
     let stopped = false;
+    let inFlight = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
-    const schedule = () => {
-      timer = setTimeout(() => {
-        if (document.hidden) {
-          schedule();
-          return;
-        }
-        void refresh().finally(() => {
-          if (!stopped) schedule();
-        });
-      }, PROCESSING_POLL_INTERVAL_MS);
+    const poll = () => {
+      clearTimeout(timer);
+      timer = undefined;
+      // A poll still running schedules the next one when it ends.
+      if (stopped || inFlight || document.hidden) return;
+      inFlight = true;
+      void refresh().finally(() => {
+        inFlight = false;
+        if (!stopped && !document.hidden) timer = setTimeout(poll, PROCESSING_POLL_INTERVAL_MS);
+      });
     };
     const onVisibilityChange = () => {
-      if (!document.hidden) void refresh();
+      if (document.hidden) {
+        clearTimeout(timer);
+        timer = undefined;
+      } else {
+        poll();
+      }
     };
 
-    schedule();
+    if (!document.hidden) timer = setTimeout(poll, PROCESSING_POLL_INTERVAL_MS);
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
       stopped = true;
