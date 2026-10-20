@@ -99,3 +99,6 @@ apps/api/src/generated
 
 # Meeting file storage of the API (FILES_DIR)
 apps/api/storage
+
+# whisper.cpp models of the API (WHISPER_MODELS_DIR)
+apps/api/models
