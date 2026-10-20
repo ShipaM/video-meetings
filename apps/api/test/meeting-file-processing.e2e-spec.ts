@@ -11,7 +11,7 @@ import { FailStuckProcessingCommand } from './../src/meeting-files/commands/inde
 import { FakeSummarizer } from './../src/meeting-files/processing/fake-summarizer.js';
 import { Summarizer } from './../src/meeting-files/processing/summarizer.js';
 import { PrismaService } from './../src/prisma/prisma.service.js';
-import { TUS_VERSION, fakeMp4, tusMetadata } from './tus.helpers.js';
+import { TUS_VERSION, fakeMp4, fakePng, tusMetadata } from './tus.helpers.js';
 
 interface FileDetails {
   id: string;
@@ -35,15 +35,6 @@ const MIME = {
   png: 'image/png',
   mp4: 'video/mp4',
 } as const;
-
-/** A PNG signature and IHDR chunk followed by filler bytes: detected as image/png. */
-const fakePng = (): Buffer =>
-  Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    Buffer.from([0, 0, 0, 13]),
-    Buffer.from('IHDR'),
-    Buffer.alloc(64, 1),
-  ]);
 
 describe('Meeting file processing (e2e)', () => {
   let app: INestApplication;
@@ -203,19 +194,28 @@ describe('Meeting file processing (e2e)', () => {
       },
     );
 
-    it('lists a processing document with its status', async () => {
+    it('lists a document with its status, and with its summary once it is READY', async () => {
       const release = summarizer.hold();
       const fileId = await uploadFixture(ownerToken, meetingId, 'notes.txt');
+      const listed = async () => {
+        const res = await request(server())
+          .get(`/meetings/${meetingId}/files`)
+          .set(auth(ownerToken))
+          .expect(200);
+        return (res.body as FileDetails[]).find((file) => file.id === fileId);
+      };
 
-      const res = await request(server())
-        .get(`/meetings/${meetingId}/files`)
-        .set(auth(ownerToken))
-        .expect(200);
-      const listed = (res.body as FileDetails[]).find((file) => file.id === fileId);
-      expect(listed).toMatchObject({ status: 'PROCESSING', failureReason: null });
+      expect(await listed()).toMatchObject({
+        status: 'PROCESSING',
+        failureReason: null,
+        summary: null,
+      });
 
       release();
       await settled(ownerToken, meetingId, fileId);
+      const ready = await listed();
+      expect(ready).toMatchObject({ status: 'READY' });
+      expect(ready?.summary).toContain(FIXTURE_TEXT);
     });
 
     it('fails with a reason when the summary cannot be generated', async () => {

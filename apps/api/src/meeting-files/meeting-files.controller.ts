@@ -18,7 +18,8 @@ import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import type { AuthenticatedRequest } from '../auth/jwt-auth.guard.js';
 import { DeleteMeetingFileCommand, RetryFileProcessingCommand } from './commands/index.js';
-import type { FileLink, MeetingFileDetails, MeetingFileView } from './meeting-files.types.js';
+import { INLINE_MIME_TYPES } from './meeting-files.config.js';
+import type { FileLink, MeetingFileDetails } from './meeting-files.types.js';
 import {
   GetFileContentQuery,
   GetFileLinkQuery,
@@ -38,7 +39,7 @@ export class MeetingFilesController {
   list(
     @Req() { user }: AuthenticatedRequest,
     @Param('id', ParseUUIDPipe) meetingId: string,
-  ): Promise<MeetingFileView[]> {
+  ): Promise<MeetingFileDetails[]> {
     return this.queryBus.execute(new ListMeetingFilesQuery(user.id, meetingId));
   }
 
@@ -86,23 +87,36 @@ export class MeetingFilesController {
   }
 
   /**
-   * Streams a file for a signed link (no bearer token: `<a download>` cannot send one).
-   * `res.sendFile` handles Range, ETag and conditional requests.
+   * Streams a file for a signed link (no bearer token: `<a download>`, `<img>` and `<iframe>`
+   * cannot send one). `res.sendFile` handles Range, ETag and conditional requests.
+   * `disposition=inline` serves a PDF or an image for a preview; anything else downloads.
    */
   @Get('files/:fileId/content')
   async content(
     @Param('fileId', ParseUUIDPipe) fileId: string,
     @Query('token') token: string | undefined,
+    @Query('disposition') disposition: string | undefined,
     @Res() res: Response,
   ): Promise<void> {
     const file = await this.queryBus.execute(new GetFileContentQuery(fileId, token));
 
     // Sets `Content-Disposition: attachment` with an RFC 5987 `filename*` for non-ASCII names.
     res.attachment(file.originalName);
+    const inline = disposition === 'inline' && INLINE_MIME_TYPES.includes(file.mimeType);
+    if (inline) {
+      // Same header with the inline type: the file name is kept for "Save as".
+      res.set(
+        'Content-Disposition',
+        res.get('Content-Disposition')?.replace(/^attachment/, 'inline'),
+      );
+    }
     await new Promise<void>((resolve, reject) => {
       res.sendFile(
         file.path,
         {
+          // A preview gets the whole file in one response: the token is checked when a request
+          // starts, so a PDF viewer asking for more ranges after the 5 minutes would get 401.
+          acceptRanges: !inline,
           headers: {
             'Content-Type': file.mimeType,
             'X-Content-Type-Options': 'nosniff',

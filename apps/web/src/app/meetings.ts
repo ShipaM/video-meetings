@@ -23,7 +23,7 @@ export type MeetingFileStatus = 'UPLOADING' | 'PROCESSING' | 'READY' | 'FAILED';
 
 export type MeetingFileKind = 'AUDIO' | 'VIDEO' | 'DOCUMENT' | 'IMAGE';
 
-/** A meeting file as returned by `GET /meetings/:id/files`. */
+/** A meeting file as returned by `GET /meetings/:id/files` (and its details route). */
 export type MeetingFile = {
   id: string;
   meetingId: string;
@@ -32,7 +32,12 @@ export type MeetingFile = {
   kind: MeetingFileKind;
   size: number;
   status: MeetingFileStatus;
+  /** Short reason of a `FAILED` file, `null` otherwise. */
   failureReason: string | null;
+  /** The API serves it inline (PDF, PNG, JPEG), so the page can preview it. */
+  previewable: boolean;
+  /** Summary of a `READY` document, `null` before, on failure and for other kinds. */
+  summary: string | null;
   createdAt: string;
   completedAt: string | null;
 };

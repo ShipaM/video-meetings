@@ -139,11 +139,11 @@ retried; images are `READY` right away.
 **Affects:** frontend
 **Tasks**
 
-- [ ] Statuses update without a manual reload (polling while any file is `PROCESSING`); `UPLOADING` is shown only to
+- [x] Statuses update without a manual reload (polling while any file is `PROCESSING`); `UPLOADING` is shown only to
       the uploading owner.
-- [ ] `FAILED` shows the reason and, for the owner, a "Retry" button.
-- [ ] Summary for processed documents; inline preview for PDF and PNG/JPEG through the short-lived signed URL.
-- [ ] `ui-ux-pro-max` + Playwright MCP visual check.
+- [x] `FAILED` shows the reason and, for the owner, a "Retry" button.
+- [x] Summary for processed documents; inline preview for PDF and PNG/JPEG through the short-lived signed URL.
+- [x] `ui-ux-pro-max` + Playwright MCP visual check.
       **Done when:** an uploaded PDF goes from Processing to Ready on screen without reload and shows a summary and a
       preview, an image previews right away, and a failed file can be retried to Ready.
 

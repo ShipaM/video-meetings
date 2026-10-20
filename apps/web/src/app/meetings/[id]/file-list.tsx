@@ -1,11 +1,13 @@
 'use client';
 
-import { AlertDialog, Button, Chip } from '@heroui/react';
-import { useState } from 'react';
+import { AlertDialog, Button, Chip, Spinner } from '@heroui/react';
+import { useEffect, useId, useRef, useState } from 'react';
+import { clearAccessToken } from '../../auth-storage';
 import { formatFileSize, formatMeetingDate, type MeetingFile } from '../../meetings';
-import { FILE_KIND_LABEL, FILE_STATUS } from './constants';
+import { ANNOUNCEMENT_RESET_MS, FILE_KIND_LABEL, FILE_STATUS } from './constants';
+import { FilePreviewPanel, FileSummary, ImageThumbnail, useFileLink } from './file-preview';
 import { getExtension } from './file-types';
-import { deleteFile, downloadFile } from './files-api';
+import { deleteFile, downloadFile, retryProcessing } from './files-api';
 import { UnmountListener } from './unmount-listener';
 import { useConfirmedRemoval } from './use-confirmed-removal';
 
@@ -93,16 +95,24 @@ function DeleteFileButton({ file, onDeleted }: { file: MeetingFile; onDeleted: (
   );
 }
 
-function FileRow({
-  file,
-  onDeleted,
-}: {
-  file: MeetingFile;
-  /** Absent for a participant, who may not delete (no button is shown). */
-  onDeleted?: () => void;
-}) {
+/** What the owner can do with a file; a participant gets none of it (read-only page). */
+export type FileActions = {
+  onDeleted: (fileId: string) => void;
+  /** Called after Retry: with the file now `PROCESSING`, or without one to reload the list. */
+  onRetried: (file?: MeetingFile) => void;
+};
+
+const actionButtonClass = 'min-h-11 flex-1 sm:min-h-10 sm:flex-none';
+
+function FileRow({ file, actions }: { file: MeetingFile; actions?: FileActions }) {
   const [isPending, setIsPending] = useState(false);
+  const [isRetrying, setIsRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const downloadButton = useRef<HTMLButtonElement>(null);
+  const previewId = useId();
+  const preview = useFileLink(file.meetingId, file.id);
+  const hasThumbnail = file.kind === 'IMAGE' && file.previewable;
   const status = FILE_STATUS[file.status];
 
   async function handleDownload() {
@@ -112,65 +122,184 @@ function FileRow({
     setIsPending(false);
   }
 
+  function togglePreview() {
+    // A reopened preview gets a fresh link if the old one is about to expire.
+    if (!isPreviewOpen) void preview.load();
+    setIsPreviewOpen((open) => !open);
+  }
+
+  async function handleRetry() {
+    if (!actions) return;
+    setIsRetrying(true);
+    setError(null);
+    const result = await retryProcessing(file);
+    setIsRetrying(false);
+    if (result.type === 'unauthorized') {
+      clearAccessToken();
+    } else if (result.type === 'retried') {
+      actions.onRetried(result.file);
+      // Retry goes away with the FAILED status: keep keyboard focus in the row.
+      requestAnimationFrame(() => downloadButton.current?.focus());
+    } else {
+      setError(result.message);
+      if (result.type === 'stale') actions.onRetried();
+    }
+  }
+
   return (
-    <li className="border-default flex flex-col gap-3 rounded-2xl border px-4 py-3 sm:flex-row sm:items-center">
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-medium break-all">{file.originalName}</span>
-          <Chip size="sm" variant="soft" color={status.color}>
-            {status.label}
-          </Chip>
+    <li className="border-default flex flex-col gap-3 rounded-2xl border px-4 py-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          {hasThumbnail && (
+            <ImageThumbnail name={file.originalName} preview={preview} onPress={togglePreview} />
+          )}
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium break-all">{file.originalName}</span>
+              <Chip size="sm" variant="soft" color={status.color} className="whitespace-nowrap">
+                {file.status === 'PROCESSING' && <Spinner size="sm" color="current" />}
+                {status.label}
+              </Chip>
+            </div>
+            <p className="text-muted text-sm">
+              {getTypeLabel(file)} · {formatFileSize(file.size)} ·{' '}
+              <time dateTime={file.completedAt ?? file.createdAt}>
+                {formatMeetingDate(file.completedAt ?? file.createdAt)}
+              </time>
+            </p>
+          </div>
         </div>
+        <div className="flex flex-wrap gap-2">
+          {file.previewable && (
+            <Button
+              variant="tertiary"
+              className={actionButtonClass}
+              aria-label={`${isPreviewOpen ? 'Hide' : 'Show'} preview of ${file.originalName}`}
+              aria-expanded={isPreviewOpen}
+              aria-controls={isPreviewOpen ? previewId : undefined}
+              onPress={togglePreview}
+            >
+              {isPreviewOpen ? (
+                // One child: the button spaces its children apart.
+                <span>
+                  Hide<span className="hidden sm:inline"> preview</span>
+                </span>
+              ) : (
+                'Preview'
+              )}
+            </Button>
+          )}
+          {actions && file.status === 'FAILED' && (
+            <Button
+              variant="secondary"
+              className={actionButtonClass}
+              aria-label={`Retry processing of ${file.originalName}`}
+              isPending={isRetrying}
+              onPress={handleRetry}
+            >
+              Retry
+            </Button>
+          )}
+          <Button
+            ref={downloadButton}
+            variant="secondary"
+            className={actionButtonClass}
+            aria-label={`Download ${file.originalName}`}
+            isPending={isPending}
+            onPress={handleDownload}
+          >
+            Download
+          </Button>
+          {actions && <DeleteFileButton file={file} onDeleted={() => actions.onDeleted(file.id)} />}
+        </div>
+      </div>
+
+      {file.status === 'PROCESSING' && (
         <p className="text-muted text-sm">
-          {getTypeLabel(file)} · {formatFileSize(file.size)} ·{' '}
-          <time dateTime={file.completedAt ?? file.createdAt}>
-            {formatMeetingDate(file.completedAt ?? file.createdAt)}
-          </time>
+          {file.kind === 'DOCUMENT' ? 'Summarizing the document.' : 'Processing the file.'} The
+          status updates by itself.
         </p>
-        {error !== null && (
-          <p role="alert" className="text-danger text-sm">
-            {error}
-          </p>
-        )}
-      </div>
-      <div className="flex gap-2">
-        <Button
-          variant="secondary"
-          className="min-h-11 flex-1 sm:min-h-10 sm:flex-none"
-          aria-label={`Download ${file.originalName}`}
-          isPending={isPending}
-          onPress={handleDownload}
-        >
-          Download
-        </Button>
-        {onDeleted && <DeleteFileButton file={file} onDeleted={onDeleted} />}
-      </div>
+      )}
+      {file.status === 'FAILED' && (
+        <p className="text-danger text-sm">
+          Processing failed: {file.failureReason ?? 'unknown error'}.
+          {!actions && ' Only the owner can retry it.'}
+        </p>
+      )}
+      {error !== null && (
+        <p role="alert" className="text-danger text-sm">
+          {error}
+        </p>
+      )}
+      {file.status === 'READY' && file.summary !== null && <FileSummary summary={file.summary} />}
+      {isPreviewOpen && <FilePreviewPanel id={previewId} file={file} preview={preview} />}
     </li>
   );
 }
 
+/**
+ * Announces files that finished processing (one polite, atomic message), without moving focus.
+ * The region is emptied before each message, so a repeated one (a retry that failed again) is
+ * read out too.
+ */
+function useProcessingAnnouncement(files: MeetingFile[]): string {
+  const previous = useRef<Map<string, MeetingFile['status']> | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const [message, setMessage] = useState('');
+
+  useEffect(() => () => clearTimeout(timer.current), []);
+
+  useEffect(() => {
+    const before = previous.current;
+    previous.current = new Map(files.map((file) => [file.id, file.status]));
+    if (!before) return; // the first load announces nothing
+    const finished = files.filter(
+      (file) => before.get(file.id) === 'PROCESSING' && file.status !== 'PROCESSING',
+    );
+    if (finished.length === 0) return;
+    const text = finished
+      .map((file) =>
+        file.status === 'FAILED'
+          ? `${file.originalName}: processing failed.`
+          : `${file.originalName} is ready.`,
+      )
+      .join(' ');
+    setMessage('');
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setMessage(text), ANNOUNCEMENT_RESET_MS);
+  }, [files]);
+
+  return message;
+}
+
 export function FileList({
   files,
-  onDeleted,
+  actions,
 }: {
   files: MeetingFile[];
-  /** Omitted for a read-only (participant) view: the delete buttons are hidden. */
-  onDeleted?: (fileId: string) => void;
+  /** Omitted for a read-only (participant) view: Retry and the delete buttons are hidden. */
+  actions?: FileActions;
 }) {
-  if (files.length === 0) {
-    return (
-      <p className="border-default rounded-2xl border border-dashed p-6 text-center text-sm">
-        {onDeleted
-          ? 'No files yet. Upload recordings, documents or images above.'
-          : 'No files yet. The owner has not uploaded anything to this meeting.'}
-      </p>
-    );
-  }
+  const announcement = useProcessingAnnouncement(files);
+
   return (
-    <ul className="flex flex-col gap-2">
-      {files.map((file) => (
-        <FileRow key={file.id} file={file} onDeleted={onDeleted && (() => onDeleted(file.id))} />
-      ))}
-    </ul>
+    <>
+      <p role="status" aria-atomic="true" className="sr-only">
+        {announcement}
+      </p>
+      {files.length === 0 ? (
+        <p className="border-default rounded-2xl border border-dashed p-6 text-center text-sm">
+          {actions
+            ? 'No files yet. Upload recordings, documents or images above.'
+            : 'No files yet. The owner has not uploaded anything to this meeting.'}
+        </p>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {files.map((file) => (
+            <FileRow key={file.id} file={file} actions={actions} />
+          ))}
+        </ul>
+      )}
+    </>
   );
 }

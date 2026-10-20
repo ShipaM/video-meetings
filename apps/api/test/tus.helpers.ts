@@ -23,6 +23,15 @@ export const fakeMp4 = (size: number): Buffer => {
   return Buffer.concat([header, randomBytes(size - header.length)]);
 };
 
+/** A PNG signature and IHDR chunk followed by filler bytes: detected as image/png. */
+export const fakePng = (): Buffer =>
+  Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.from([0, 0, 0, 13]),
+    Buffer.from('IHDR'),
+    Buffer.alloc(64, 1),
+  ]);
+
 export const sha256 = (data: Buffer): string => createHash('sha256').update(data).digest('hex');
 
 /**

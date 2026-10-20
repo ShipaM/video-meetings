@@ -3,11 +3,12 @@
 import { Alert, Card, Skeleton, buttonVariants } from '@heroui/react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clearAccessToken, useAccessToken } from '../../auth-storage';
 import { API_URL, SERVER_UNAVAILABLE_MESSAGE } from '../../constants';
 import { formatMeetingDate, type Meeting, type MeetingFile } from '../../meetings';
 import { SharedChip } from '../../shared-chip';
+import { PROCESSING_POLL_INTERVAL_MS } from './constants';
 import { FileList } from './file-list';
 import { ParticipantsSection } from './participants-section';
 import { UploadArea } from './upload-area';
@@ -51,7 +52,10 @@ async function fetchMeeting(
 }
 
 type FilesResult =
-  { type: 'files'; files: MeetingFile[] } | { type: 'unauthorized' } | { type: 'error' };
+  | { type: 'files'; files: MeetingFile[] }
+  | { type: 'unauthorized' }
+  | { type: 'not-found' }
+  | { type: 'error' };
 
 /** Only the file list changes after an upload, so a refresh skips the meeting itself. */
 async function fetchFiles(token: string, meetingId: string): Promise<FilesResult> {
@@ -60,11 +64,56 @@ async function fetchFiles(token: string, meetingId: string): Promise<FilesResult
       headers: { Authorization: `Bearer ${token}` },
     });
     if (response.status === 401) return { type: 'unauthorized' };
+    // The meeting was deleted or access ended (e.g. the participant was removed) meanwhile.
+    if (response.status === 404) return { type: 'not-found' };
     if (!response.ok) return { type: 'error' };
     return { type: 'files', files: (await response.json()) as MeetingFile[] };
   } catch {
     return { type: 'error' };
   }
+}
+
+/**
+ * Reloads the file list every few seconds while `isActive` (a file is `PROCESSING`), so statuses
+ * and summaries appear without a manual reload. One request at a time, the next one an interval
+ * after the previous answer. A hidden tab has no timer at all; it reloads at once when it becomes
+ * visible again, and that reload replaces the pending one.
+ */
+function useProcessingPolling(isActive: boolean, refresh: () => Promise<void>) {
+  useEffect(() => {
+    if (!isActive) return;
+    let stopped = false;
+    let inFlight = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const poll = () => {
+      clearTimeout(timer);
+      timer = undefined;
+      // A poll still running schedules the next one when it ends.
+      if (stopped || inFlight || document.hidden) return;
+      inFlight = true;
+      void refresh().finally(() => {
+        inFlight = false;
+        if (!stopped && !document.hidden) timer = setTimeout(poll, PROCESSING_POLL_INTERVAL_MS);
+      });
+    };
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        clearTimeout(timer);
+        timer = undefined;
+      } else {
+        poll();
+      }
+    };
+
+    if (!document.hidden) timer = setTimeout(poll, PROCESSING_POLL_INTERVAL_MS);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [isActive, refresh]);
 }
 
 const backLinkClass = buttonVariants({ variant: 'secondary', className: 'w-full sm:w-auto' });
@@ -116,6 +165,8 @@ function MeetingContent({ token, meetingId }: { token: string; meetingId: string
       if (id !== refreshId.current) return latestRefresh.current;
       if (result.type === 'unauthorized') {
         clearAccessToken();
+      } else if (result.type === 'not-found') {
+        setState({ type: 'not-found' });
       } else if (result.type === 'files') {
         setState((current) =>
           current.type === 'ready' ? { ...current, files: result.files } : current,
@@ -144,8 +195,37 @@ function MeetingContent({ token, meetingId }: { token: string; meetingId: string
     [refresh],
   );
 
-  // Participants get a read-only page: no upload, delete or participant management.
+  /**
+   * Shows a retried file as `PROCESSING` at once (polling starts), then reloads the list so no
+   * refresh started before the retry brings back `FAILED`. Without a file only reloads.
+   */
+  const applyRetry = useCallback(
+    (retried?: MeetingFile) => {
+      if (retried) {
+        setState((current) =>
+          current.type === 'ready'
+            ? {
+                ...current,
+                files: current.files.map((file) => (file.id === retried.id ? retried : file)),
+              }
+            : current,
+        );
+      }
+      void refresh();
+    },
+    [refresh],
+  );
+
+  const isProcessing =
+    state.type === 'ready' && state.files.some((file) => file.status === 'PROCESSING');
+  useProcessingPolling(isProcessing, refresh);
+
+  // Participants get a read-only page: no upload, retry, delete or participant management.
   const isOwner = state.type === 'ready' && state.meeting.role === 'owner';
+  const fileActions = useMemo(
+    () => (isOwner ? { onDeleted: removeFile, onRetried: applyRetry } : undefined),
+    [isOwner, removeFile, applyRetry],
+  );
 
   return (
     <main className="flex flex-1 items-start justify-center p-4 pt-16 sm:p-6 sm:pt-20">
@@ -228,7 +308,7 @@ function MeetingContent({ token, meetingId }: { token: string; meetingId: string
                 >
                   Files{state.files.length > 0 ? ` (${state.files.length})` : ''}
                 </h2>
-                <FileList files={state.files} onDeleted={isOwner ? removeFile : undefined} />
+                <FileList files={state.files} actions={fileActions} />
               </section>
 
               {isOwner && <ParticipantsSection meetingId={state.meeting.id} />}

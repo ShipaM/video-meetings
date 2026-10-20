@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, readdir, rm, utimes, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { Server } from 'node:http';
@@ -17,6 +17,7 @@ import {
   TUS_VERSION,
   binaryParser,
   fakeMp4,
+  fakePng,
   interruptedPatch,
   sha256,
   tusMetadata,
@@ -30,6 +31,7 @@ interface FileBody {
   kind: string;
   size: number;
   status: string;
+  previewable: boolean;
   createdAt: string;
 }
 
@@ -39,6 +41,7 @@ interface LinkBody {
 }
 
 const MAX_FILE_SIZE = 2 * 1024 ** 3;
+const PDF_FIXTURE = path.join(import.meta.dirname, 'fixtures', 'notes.pdf');
 const MiB = 1024 ** 2;
 
 describe('Meeting files (e2e)', () => {
@@ -422,6 +425,51 @@ describe('Meeting files (e2e)', () => {
       expect(res.headers['content-disposition']).toContain(
         `filename*=UTF-8''${encodeURIComponent('Встреча.mp4')}`,
       );
+    });
+
+    it('serves a PDF or an image inline for a preview when asked', async () => {
+      const pdf = await upload(
+        ownerToken,
+        meetingId,
+        await readFile(PDF_FIXTURE),
+        'notes.pdf',
+        'application/pdf',
+      );
+      const png = await upload(ownerToken, meetingId, fakePng(), 'board.png', 'image/png');
+
+      for (const [location, type, name] of [
+        [pdf, 'application/pdf', 'notes.pdf'],
+        [png, 'image/png', 'board.png'],
+      ]) {
+        const link = await requestLink(ownerToken, meetingId, fileIdOf(location)).expect(201);
+        const res = await download(`${(link.body as LinkBody).url}&disposition=inline`).expect(200);
+        expect(res.headers['content-type']).toBe(type);
+        expect(res.headers['content-disposition']).toBe(`inline; filename="${name}"`);
+        expect(res.headers['x-content-type-options']).toBe('nosniff');
+        // No byte ranges: a viewer loads the whole file while the short-lived link is valid,
+        // instead of asking for more ranges after it expired.
+        expect(res.headers['accept-ranges']).toBeUndefined();
+        const ranged = await download(`${(link.body as LinkBody).url}&disposition=inline`)
+          .set('Range', 'bytes=0-9')
+          .expect(200);
+        expect(ranged.headers['content-range']).toBeUndefined();
+      }
+
+      const listed = await listFiles(ownerToken, meetingId);
+      expect(listed.find((file) => file.id === fileIdOf(pdf))?.previewable).toBe(true);
+      expect(listed.find((file) => file.id === fileIdOf(png))?.previewable).toBe(true);
+    });
+
+    it('keeps other types an attachment even when inline is asked', async () => {
+      const location = await upload(ownerToken, meetingId, fakeMp4(1024), 'call.mp4');
+
+      const link = await requestLink(ownerToken, meetingId, fileIdOf(location)).expect(201);
+      const res = await download(`${(link.body as LinkBody).url}&disposition=inline`).expect(200);
+      expect(res.headers['content-disposition']).toBe('attachment; filename="call.mp4"');
+      expect(res.headers['accept-ranges']).toBe('bytes');
+
+      const listed = await listFiles(ownerToken, meetingId);
+      expect(listed.find((file) => file.id === fileIdOf(location))?.previewable).toBe(false);
     });
 
     it('does not issue a link for an upload that is not complete (404)', async () => {

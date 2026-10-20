@@ -108,6 +108,29 @@ export const UPLOAD_ERROR_MESSAGES = {
 export const FILE_GONE_MESSAGE = 'This file is no longer available.';
 export const DOWNLOAD_FAILED_MESSAGE = 'Could not start the download. Please try again.';
 export const DELETE_FAILED_MESSAGE = 'Could not delete the file. Please try again.';
+export const PREVIEW_FAILED_MESSAGE = 'Could not load the preview. Please try again.';
+export const RETRY_FAILED_MESSAGE = 'Could not start processing again. Please try again.';
+/** A `409` on retry: the file is not `FAILED` any more (e.g. retried from another tab). */
+export const RETRY_CONFLICT_MESSAGE = 'This file is already being processed again.';
+
+/** How often the file list is reloaded while any file is `PROCESSING`. */
+export const PROCESSING_POLL_INTERVAL_MS = 3000;
+
+/**
+ * How long a signed link is reused for previews. API links live 5 minutes; the age is measured on
+ * the page's own monotonic clock (`performance.now()`), so a wrong system clock does not matter.
+ */
+export const FILE_LINK_REUSE_MS = 4 * 60 * 1000;
+
+/** Image thumbnails request their link once the row is this close to the viewport. */
+export const THUMBNAIL_ROOT_MARGIN = '200px';
+
+/** A repeated announcement is cleared first and set again after this delay, so it is re-read. */
+export const ANNOUNCEMENT_RESET_MS = 100;
+
+/** Shown when a new tab for a preview could not be opened (pop-ups blocked). */
+export const POPUP_BLOCKED_MESSAGE =
+  'The browser blocked the new tab. Allow pop-ups and try again.';
 
 /** Longest wait for the delete dialog's exit animation before the deleted row is removed anyway. */
 export const DIALOG_CLOSE_FALLBACK_MS = 1000;
