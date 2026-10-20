@@ -18,6 +18,12 @@ export function resolveFilesDir(): string {
 /** Lifetime of a signed download link. */
 export const FILE_LINK_TTL_SECONDS = 5 * 60;
 
+/**
+ * Stored types a link may serve inline (`?disposition=inline`) for a preview in the page; every
+ * other type is always an attachment, so no uploaded content is ever rendered by the browser.
+ */
+export const INLINE_MIME_TYPES = ['application/pdf', 'image/png', 'image/jpeg'];
+
 /** JWT audience of file links, so an access token can never be used as a link and vice versa. */
 export const FILE_LINK_AUDIENCE = 'file-content';
 
