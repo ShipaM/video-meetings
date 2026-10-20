@@ -108,7 +108,7 @@ page, so the owner and the people they share the meeting with have the meeting's
   recordings and documents are never sent to an external service. Processing takes time (on CPU, about as long as
   the recording or longer). It must run in the background without blocking the API, and a failure or hang of the
   local models must end in the Failed status, not a hung Processing.
-- The maximum recording length that is transcribed is **not decided yet** (open question). A 2 GB video can last
+- The maximum recording length that is transcribed is **180 minutes** by default (configurable). A 2 GB video can last
   several hours; longer recordings than the chosen limit must end in Failed with a reason that names the limit.
 - `Meeting` rows are deleted by a database cascade when their owner `User` is deleted. Any future meeting or account
   deletion must also remove the stored files, so stored files never outlive their meeting.

@@ -8,9 +8,9 @@
 - **AI processing** is decided: transcription and summarization run locally on the API server (whisper.cpp and a
   local LLM through Ollama, see [research-meeting-upload.md](research-meeting-upload.md)), so no meeting content
   leaves the server. They stay behind `Transcriber` / `Summarizer` interfaces with a fake implementation for tests.
-- **Maximum recording length** is a configurable limit (`MAX_RECORDING_MINUTES`). Phase 9 proposes a default of
-  180 minutes from the measured speed: whisper.cpp `small.en` transcribes in about 0.7 x the duration on the dev
-  laptop's CPU, so the longest recording takes about 2 hours. To be confirmed.
+- **Maximum recording length** is a configurable limit (`MAX_RECORDING_MINUTES`). The default is **180 minutes**
+  (agreed in Phase 9), from the measured speed: whisper.cpp `small.en` transcribes in about 0.7 x the duration on
+  the dev laptop's CPU, so the longest recording takes about 2 hours.
 
 ## Implementation phases
 
