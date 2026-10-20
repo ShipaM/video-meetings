@@ -108,6 +108,25 @@ export const UPLOAD_ERROR_MESSAGES = {
 export const FILE_GONE_MESSAGE = 'This file is no longer available.';
 export const DOWNLOAD_FAILED_MESSAGE = 'Could not start the download. Please try again.';
 export const DELETE_FAILED_MESSAGE = 'Could not delete the file. Please try again.';
+export const PREVIEW_FAILED_MESSAGE = 'Could not load the preview. Please try again.';
+export const RETRY_FAILED_MESSAGE = 'Could not start processing again. Please try again.';
+/** A `409` on retry: the file is not `FAILED` any more (e.g. retried from another tab). */
+export const RETRY_CONFLICT_MESSAGE = 'This file is already being processed again.';
+
+/** How often the file list is reloaded while any file is `PROCESSING`. */
+export const PROCESSING_POLL_INTERVAL_MS = 3000;
+
+/**
+ * Stored types the API serves inline for a preview (`disposition=inline`), mirroring
+ * `INLINE_MIME_TYPES` in `apps/api/src/meeting-files/meeting-files.config.ts`.
+ */
+export const PREVIEW_MIME_TYPES = ['application/pdf', 'image/png', 'image/jpeg'];
+
+/** A cached signed link is requested again when it expires within this time. */
+export const FILE_LINK_REFRESH_MARGIN_MS = 60 * 1000;
+
+/** Summaries longer than this are clamped to a few lines with "Show more". */
+export const SUMMARY_CLAMP_CHARACTERS = 280;
 
 /** Longest wait for the delete dialog's exit animation before the deleted row is removed anyway. */
 export const DIALOG_CLOSE_FALLBACK_MS = 1000;
