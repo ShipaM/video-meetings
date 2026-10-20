@@ -69,6 +69,16 @@ export const FILE_KIND_LABEL: Record<MeetingFileKind, string> = {
   IMAGE: 'Image',
 };
 
+const TRANSCRIBING_TEXT = 'Transcribing the recording, which can take a while.';
+
+/** What a `PROCESSING` file is waiting for, by kind. */
+export const PROCESSING_TEXT: Record<MeetingFileKind, string> = {
+  AUDIO: TRANSCRIBING_TEXT,
+  VIDEO: TRANSCRIBING_TEXT,
+  DOCUMENT: 'Summarizing the document.',
+  IMAGE: 'Processing the file.',
+};
+
 /** Label and chip colour of a stored file's status. */
 export const FILE_STATUS: Record<
   MeetingFileStatus,
@@ -112,6 +122,9 @@ export const PREVIEW_FAILED_MESSAGE = 'Could not load the preview. Please try ag
 export const PLAYER_FAILED_MESSAGE = 'Could not load the recording. Please try again.';
 export const PLAYER_UNSUPPORTED_MESSAGE =
   'This browser cannot play this recording. Download it to play it in another app.';
+/** The media loaded but could not be decoded (e.g. a damaged part). */
+export const PLAYER_DECODE_MESSAGE =
+  'The browser could not decode this recording. Download it to play it in another app.';
 export const TRANSCRIPT_FAILED_MESSAGE = 'Could not load the transcript. Please try again.';
 export const RETRY_FAILED_MESSAGE = 'Could not start processing again. Please try again.';
 /** A `409` on retry: the file is not `FAILED` any more (e.g. retried from another tab). */
@@ -134,6 +147,12 @@ export const THUMBNAIL_ROOT_MARGIN = '200px';
  * line they are reading is not pulled away from them.
  */
 export const TRANSCRIPT_FOLLOW_PAUSE_MS = 5000;
+
+/**
+ * After the player replaced a broken link, it does so again only once playback has moved this far:
+ * a recording that fails at the same spot every time ends in an error instead of a refresh loop.
+ */
+export const PLAYER_REFRESH_RESET_SECONDS = 5;
 
 /** A repeated announcement is cleared first and set again after this delay, so it is re-read. */
 export const ANNOUNCEMENT_RESET_MS = 100;

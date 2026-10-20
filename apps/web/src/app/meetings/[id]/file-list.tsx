@@ -15,6 +15,7 @@ import {
   FILE_STATUS,
   PLAYER_FAILED_MESSAGE,
   PREVIEW_FAILED_MESSAGE,
+  PROCESSING_TEXT,
 } from './constants';
 import { FilePreviewPanel, FileSummary, ImageThumbnail, useFileLink } from './file-preview';
 import { getExtension } from './file-types';
@@ -112,14 +113,6 @@ export type FileActions = {
   onDeleted: (fileId: string) => void;
   /** Called after Retry: with the file now `PROCESSING`, or without one to reload the list. */
   onRetried: (file?: MeetingFile) => void;
-};
-
-/** What a `PROCESSING` file is waiting for. */
-const PROCESSING_TEXT: Record<MeetingFile['kind'], string> = {
-  AUDIO: 'Transcribing the recording, which can take a while.',
-  VIDEO: 'Transcribing the recording, which can take a while.',
-  DOCUMENT: 'Summarizing the document.',
-  IMAGE: 'Processing the file.',
 };
 
 const actionButtonClass = 'min-h-11 flex-1 sm:min-h-10 sm:flex-none';

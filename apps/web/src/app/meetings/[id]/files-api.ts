@@ -50,6 +50,22 @@ export function inlineUrl(link: FileLink): string {
 }
 
 /**
+ * Whether the API still serves the link's content: `ok`, `gone` (`404`, access ended) or `error`.
+ * Only the status is read; the (possibly large) body is cancelled at once.
+ */
+export async function probeFileLink(link: FileLink): Promise<'ok' | 'gone' | 'error'> {
+  const controller = new AbortController();
+  try {
+    const response = await fetch(inlineUrl(link), { signal: controller.signal, cache: 'no-store' });
+    controller.abort();
+    if (response.ok) return 'ok';
+    return response.status === 404 ? 'gone' : 'error';
+  } catch {
+    return 'error';
+  }
+}
+
+/**
  * Asks the API for a short-lived signed link and lets the browser download it. Resolves to an
  * error message, or `null` when the download started (or the session ended).
  */

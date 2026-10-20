@@ -148,6 +148,20 @@ export function ImageThumbnail({
   );
 }
 
+/** An error in a preview or player panel, with Try again next to it. */
+export function PanelError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <p role="alert" className="text-danger flex-1 text-sm">
+        {message}
+      </p>
+      <Button size="sm" variant="secondary" className="min-h-11 sm:min-h-9" onPress={onRetry}>
+        Try again
+      </Button>
+    </div>
+  );
+}
+
 /** The opened preview of a PDF or an image, below its row. */
 export function FilePreviewPanel({
   id,
@@ -189,21 +203,7 @@ export function FilePreviewPanel({
 
   return (
     <div id={id} className="border-default flex flex-col gap-3 rounded-xl border p-3">
-      {shownError !== null && (
-        <div className="flex flex-wrap items-center gap-3">
-          <p role="alert" className="text-danger flex-1 text-sm">
-            {shownError}
-          </p>
-          <Button
-            size="sm"
-            variant="secondary"
-            className="min-h-11 sm:min-h-9"
-            onPress={() => void load(true)}
-          >
-            Try again
-          </Button>
-        </div>
-      )}
+      {shownError !== null && <PanelError message={shownError} onRetry={() => void load(true)} />}
       {shownError === null && link === null && (
         <Skeleton
           className="h-64 rounded-lg sm:h-96"

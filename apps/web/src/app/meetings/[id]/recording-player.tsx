@@ -1,16 +1,28 @@
 'use client';
 
-import { Button, Skeleton } from '@heroui/react';
-import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { clearAccessToken } from '../../auth-storage';
+import { Skeleton } from '@heroui/react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { formatDuration, type MeetingFile, type TranscriptSegment } from '../../meetings';
 import {
+  FILE_GONE_MESSAGE,
+  PLAYER_DECODE_MESSAGE,
   PLAYER_FAILED_MESSAGE,
+  PLAYER_REFRESH_RESET_SECONDS,
   PLAYER_UNSUPPORTED_MESSAGE,
+  TRANSCRIPT_FAILED_MESSAGE,
   TRANSCRIPT_FOLLOW_PAUSE_MS,
 } from './constants';
-import type { FileLinkState } from './file-preview';
-import { type FileLink, fetchTranscript, inlineUrl } from './files-api';
+import { type FileLinkState, PanelError } from './file-preview';
+import { type FileLink, fetchTranscript, inlineUrl, probeFileLink } from './files-api';
 
 type TranscriptState =
   | { type: 'loading' }
@@ -30,9 +42,15 @@ function useTranscript(file: MeetingFile) {
     const controller = new AbortController();
     fetchTranscript({ meetingId, id }, controller.signal).then(
       (result) => {
-        if (result.type === 'unauthorized') clearAccessToken();
-        else if (result.type === 'error') setState(result);
-        else setState({ type: 'loaded', segments: result.transcript });
+        if (result.type === 'transcript') {
+          setState({ type: 'loaded', segments: result.transcript });
+        } else {
+          // `unauthorized`: the token is already cleared and the page goes to the login page.
+          setState({
+            type: 'error',
+            message: result.type === 'error' ? result.message : TRANSCRIPT_FAILED_MESSAGE,
+          });
+        }
       },
       () => {
         // Aborted: the panel was closed.
@@ -47,6 +65,36 @@ function useTranscript(file: MeetingFile) {
   }, []);
 
   return { state, reload };
+}
+
+/**
+ * The index of the transcript line playing, outside React state: it changes every few seconds
+ * during playback, and only the two lines whose highlight changes should render again, not the
+ * panel and the whole list of a long meeting.
+ */
+type ActiveLineStore = {
+  get: () => number;
+  set: (index: number) => void;
+  subscribe: (listener: () => void) => () => void;
+};
+
+function createActiveLineStore(): ActiveLineStore {
+  let current = -1;
+  const listeners = new Set<() => void>();
+  return {
+    get: () => current,
+    set: (index) => {
+      if (index === current) return;
+      current = index;
+      listeners.forEach((listener) => listener());
+    },
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
 }
 
 /** Index of the segment playing at `ms`: the last one started by then, `-1` before the first. */
@@ -76,29 +124,56 @@ function vttTime(ms: number): string {
 }
 
 /**
+ * Cue text as WebVTT reads it: a cue ends at a blank line, and `<` / `&` start tags and character
+ * references, so they are escaped (with `>`, which also covers `-->`).
+ */
+function vttText(text: string): string {
+  return text
+    .replace(/\s*\n\s*/g, ' ')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
+}
+
+/**
  * The transcript as a WebVTT `data:` URL for the video's captions track. A `data:` URL needs no
  * revoking, unlike a blob URL, and is same-origin for the track whatever serves the video.
  */
 function toCaptionsUrl(segments: TranscriptSegment[]): string {
   const cues = segments.map(
     (segment) =>
-      // A cue ends at a blank line and must not contain `-->`.
-      `${vttTime(segment.startMs)} --> ${vttTime(segment.endMs)}\n${segment.text
-        .replace(/\s*\n\s*/g, ' ')
-        .replaceAll('-->', '->')}`,
+      `${vttTime(segment.startMs)} --> ${vttTime(segment.endMs)}\n${vttText(segment.text)}`,
   );
   return `data:text/vtt;charset=utf-8,${encodeURIComponent(`WEBVTT\n\n${cues.join('\n\n')}\n`)}`;
 }
 
+/** Why the media failed for good, by its error code (asking the API when it cannot tell). */
+async function playerFailureMessage(code: number | undefined, link: FileLink): Promise<string> {
+  if (code === MediaError.MEDIA_ERR_DECODE) return PLAYER_DECODE_MESSAGE;
+  if (code !== MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) return PLAYER_FAILED_MESSAGE;
+  // Browsers report a failed request (403, 404, 5xx) with the same code as an unknown format.
+  const served = await probeFileLink(link);
+  if (served === 'ok') return PLAYER_UNSUPPORTED_MESSAGE;
+  return served === 'gone' ? FILE_GONE_MESSAGE : PLAYER_FAILED_MESSAGE;
+}
+
 const TranscriptLine = memo(function TranscriptLine({
   segment,
-  isActive,
+  index,
+  activeLine,
   onSeek,
 }: {
   segment: TranscriptSegment;
-  isActive: boolean;
+  index: number;
+  activeLine: ActiveLineStore;
   onSeek: (ms: number) => void;
 }) {
+  const isActive = useSyncExternalStore(
+    activeLine.subscribe,
+    () => activeLine.get() === index,
+    () => false,
+  );
+
   return (
     <li>
       <button
@@ -130,33 +205,37 @@ const TranscriptLine = memo(function TranscriptLine({
  * The timed transcript. The line playing is highlighted, and the list scrolls itself (not the
  * page) to keep it in view, unless the user has just scrolled or moved through it themselves.
  */
-function TranscriptList({
+const TranscriptList = memo(function TranscriptList({
   segments,
-  activeIndex,
+  activeLine,
   onSeek,
 }: {
   segments: TranscriptSegment[];
-  activeIndex: number;
+  activeLine: ActiveLineStore;
   onSeek: (ms: number) => void;
 }) {
   const list = useRef<HTMLOListElement>(null);
   const followPausedUntil = useRef(0);
 
-  useEffect(() => {
-    const element = list.current;
-    const item = element?.children[activeIndex] as HTMLElement | undefined;
-    if (!element || !item || performance.now() < followPausedUntil.current) return;
-    const top = item.offsetTop;
-    const isVisible =
-      top >= element.scrollTop &&
-      top + item.offsetHeight <= element.scrollTop + element.clientHeight;
-    if (isVisible) return;
-    const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-    element.scrollTo({
-      top: top - element.clientHeight / 3,
-      behavior: reduceMotion ? 'auto' : 'smooth',
-    });
-  }, [activeIndex]);
+  useEffect(
+    () =>
+      activeLine.subscribe(() => {
+        const element = list.current;
+        const item = element?.children[activeLine.get()] as HTMLElement | undefined;
+        if (!element || !item || performance.now() < followPausedUntil.current) return;
+        const top = item.offsetTop;
+        const isVisible =
+          top >= element.scrollTop &&
+          top + item.offsetHeight <= element.scrollTop + element.clientHeight;
+        if (isVisible) return;
+        const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+        element.scrollTo({
+          top: top - element.clientHeight / 3,
+          behavior: reduceMotion ? 'auto' : 'smooth',
+        });
+      }),
+    [activeLine],
+  );
 
   const pauseFollowing = () => {
     followPausedUntil.current = performance.now() + TRANSCRIPT_FOLLOW_PAUSE_MS;
@@ -183,32 +262,21 @@ function TranscriptList({
         <TranscriptLine
           key={index}
           segment={segment}
-          isActive={index === activeIndex}
+          index={index}
+          activeLine={activeLine}
           onSeek={seek}
         />
       ))}
     </ol>
   );
-}
-
-function PanelError({ message, onRetry }: { message: string; onRetry: () => void }) {
-  return (
-    <div className="flex flex-wrap items-center gap-3">
-      <p role="alert" className="text-danger flex-1 text-sm">
-        {message}
-      </p>
-      <Button size="sm" variant="secondary" className="min-h-11 sm:min-h-9" onPress={onRetry}>
-        Try again
-      </Button>
-    </div>
-  );
-}
+});
 
 /**
  * The player of an audio or video file with its transcript, below the file's row. The media
- * streams from the short-lived signed link (served inline with byte ranges). When the link stops
- * working (it expired during a long session), one fresh link is requested and playback continues
- * from the same position; a second failure in a row is shown with Try again.
+ * streams from the short-lived signed link (served inline with byte ranges). When loading fails
+ * (the link expired during a long session), one fresh link is requested and playback continues
+ * from the same position; another failure before playback has moved on, or an error a new link
+ * cannot fix (decoding), is shown with Try again.
  */
 export function RecordingPanel({
   id,
@@ -227,6 +295,7 @@ export function RecordingPanel({
   const segments = transcript.state.type === 'loaded' ? transcript.state.segments : null;
   const isVideo = file.kind === 'VIDEO';
   const headingId = useId();
+  const [activeLine] = useState(createActiveLineStore);
 
   const media = useRef<HTMLMediaElement | null>(null);
   /** Position to restore (and whether to play) once the next source has loaded its metadata. */
@@ -235,29 +304,38 @@ export function RecordingPanel({
   );
   const position = useRef(0);
   const isPlaying = useRef(false);
-  /** A fresh link was requested after an error, and nothing has played since. */
-  const hasRefreshed = useRef(false);
+  /** Where the broken link was replaced; `null` once playback has moved on from there. */
+  const refreshedAt = useRef<number | null>(null);
   const [failure, setFailure] = useState<{ link: FileLink; message: string } | null>(null);
-  const [activeIndex, setActiveIndex] = useState(-1);
   const shownError = error ?? (failure !== null && failure.link === link ? failure.message : null);
 
   const segmentsRef = useRef(segments);
   useEffect(() => {
     segmentsRef.current = segments;
-  }, [segments]);
+    // Highlight the current line as soon as the transcript is there, even while paused.
+    if (segments) activeLine.set(findSegmentIndex(segments, position.current * 1000));
+  }, [segments, activeLine]);
 
   const captionsUrl = useMemo(
     () => (isVideo && segments && segments.length > 0 ? toCaptionsUrl(segments) : null),
     [isVideo, segments],
   );
 
-  function updateActive() {
+  const setMedia = useCallback((element: HTMLMediaElement | null) => {
+    media.current = element;
+  }, []);
+
+  function updatePosition() {
     const element = media.current;
     // A source being (re)loaded reports position 0: keep the position to resume from.
     if (!element || element.readyState < HTMLMediaElement.HAVE_METADATA) return;
     position.current = element.currentTime;
+    const from = refreshedAt.current;
+    if (from !== null && Math.abs(element.currentTime - from) >= PLAYER_REFRESH_RESET_SECONDS) {
+      refreshedAt.current = null;
+    }
     const current = segmentsRef.current;
-    if (current) setActiveIndex(findSegmentIndex(current, element.currentTime * 1000));
+    if (current) activeLine.set(findSegmentIndex(current, element.currentTime * 1000));
   }
 
   function handleLoadedMetadata() {
@@ -270,17 +348,21 @@ export function RecordingPanel({
     if (target.play) element.play().catch(() => {});
   }
 
-  function handleError() {
+  async function handleError() {
     const element = media.current;
     if (!element || !link) return;
-    if (!hasRefreshed.current) {
-      hasRefreshed.current = true;
+    const code = element.error?.code;
+    // Only a failed load can be an expired link; a decode error stays with any link.
+    const mayBeLink =
+      code === MediaError.MEDIA_ERR_NETWORK || code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED;
+    if (mayBeLink && refreshedAt.current === null) {
+      refreshedAt.current = position.current;
       resume.current = { seconds: position.current, play: isPlaying.current };
       void load(true);
       return;
     }
-    const unsupported = element.error?.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED;
-    setFailure({ link, message: unsupported ? PLAYER_UNSUPPORTED_MESSAGE : PLAYER_FAILED_MESSAGE });
+    const message = await playerFailureMessage(code, link);
+    setFailure({ link, message });
   }
 
   function tryAgain() {
@@ -290,40 +372,38 @@ export function RecordingPanel({
     void load(true);
   }
 
-  const seek = useCallback((ms: number) => {
-    const element = media.current;
-    const current = segmentsRef.current;
-    if (current) setActiveIndex(findSegmentIndex(current, ms));
-    position.current = ms / 1000;
-    if (!element || element.readyState < HTMLMediaElement.HAVE_METADATA) {
-      resume.current = { seconds: ms / 1000, play: true };
-      return;
-    }
-    element.currentTime = ms / 1000;
-    element.play().catch(() => {});
-  }, []);
+  const seek = useCallback(
+    (ms: number) => {
+      const element = media.current;
+      const current = segmentsRef.current;
+      if (current) activeLine.set(findSegmentIndex(current, ms));
+      position.current = ms / 1000;
+      if (!element || element.readyState < HTMLMediaElement.HAVE_METADATA) {
+        resume.current = { seconds: ms / 1000, play: true };
+        return;
+      }
+      element.currentTime = ms / 1000;
+      element.play().catch(() => {});
+    },
+    [activeLine],
+  );
 
   const mediaProps = {
-    ref: (element: HTMLMediaElement | null) => {
-      media.current = element;
-    },
+    ref: setMedia,
     src: link ? inlineUrl(link) : undefined,
     controls: true,
     preload: 'metadata',
     'aria-label': `${isVideo ? 'Video' : 'Audio'} player of ${file.originalName}`,
     onLoadedMetadata: handleLoadedMetadata,
-    onCanPlay: () => {
-      hasRefreshed.current = false;
-    },
     onPlay: () => {
       isPlaying.current = true;
     },
     onPause: () => {
       isPlaying.current = false;
     },
-    onTimeUpdate: updateActive,
-    onSeeked: updateActive,
-    onError: handleError,
+    onTimeUpdate: updatePosition,
+    onSeeked: updatePosition,
+    onError: () => void handleError(),
   } as const;
 
   return (
@@ -358,8 +438,13 @@ export function RecordingPanel({
             <p className="text-muted text-xs">Select a line to play from there.</p>
           )}
         </div>
-        {file.status !== 'READY' && (
+        {file.status === 'PROCESSING' && (
           <p className="text-muted text-sm">The transcript appears once processing has finished.</p>
+        )}
+        {file.status === 'FAILED' && (
+          <p className="text-muted text-sm">
+            There is no transcript: processing of this recording failed.
+          </p>
         )}
         {file.status === 'READY' && transcript.state.type === 'loading' && (
           <div className="flex flex-col gap-2" aria-busy="true" aria-label="Loading the transcript">
@@ -377,7 +462,7 @@ export function RecordingPanel({
             <p className="text-muted text-sm">There is no transcript for this recording.</p>
           )}
         {file.status === 'READY' && segments !== null && segments.length > 0 && (
-          <TranscriptList segments={segments} activeIndex={activeIndex} onSeek={seek} />
+          <TranscriptList segments={segments} activeLine={activeLine} onSeek={seek} />
         )}
       </section>
     </div>
