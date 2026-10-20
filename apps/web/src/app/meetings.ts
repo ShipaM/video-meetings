@@ -36,10 +36,27 @@ export type MeetingFile = {
   failureReason: string | null;
   /** The API serves it inline (PDF, PNG, JPEG), so the page can preview it. */
   previewable: boolean;
-  /** Summary of a `READY` document, `null` before, on failure and for other kinds. */
+  /** The API serves it inline with byte ranges (audio, video), so the page can play it. */
+  playable: boolean;
+  /** Length of a recording once the API has probed it, `null` otherwise. */
+  durationMs: number | null;
+  /** Summary of a `READY` document or recording, `null` before, on failure and for images. */
   summary: string | null;
   createdAt: string;
   completedAt: string | null;
+};
+
+/** A timed piece of a recording's transcript. */
+export type TranscriptSegment = {
+  startMs: number;
+  endMs: number;
+  text: string;
+};
+
+/** A file as returned by its details route `GET /meetings/:id/files/:fileId`. */
+export type MeetingFileDetails = MeetingFile & {
+  /** The transcript of a `READY` recording, `null` otherwise (or for one without segments). */
+  transcript: TranscriptSegment[] | null;
 };
 
 const dateFormat = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
@@ -68,4 +85,15 @@ export function formatFileSize(bytes: number): string {
   }
   const rounded = roundSize(value, unit);
   return `${rounded.value.toFixed(rounded.digits)} ${FILE_SIZE_UNITS[unit]}`;
+}
+
+/** A media position or length as `m:ss`, or `h:mm:ss` from an hour on, e.g. `3:07`. */
+export function formatDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = String(totalSeconds % 60).padStart(2, '0');
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, '0')}:${seconds}`
+    : `${minutes}:${seconds}`;
 }

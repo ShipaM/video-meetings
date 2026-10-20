@@ -109,6 +109,10 @@ export const FILE_GONE_MESSAGE = 'This file is no longer available.';
 export const DOWNLOAD_FAILED_MESSAGE = 'Could not start the download. Please try again.';
 export const DELETE_FAILED_MESSAGE = 'Could not delete the file. Please try again.';
 export const PREVIEW_FAILED_MESSAGE = 'Could not load the preview. Please try again.';
+export const PLAYER_FAILED_MESSAGE = 'Could not load the recording. Please try again.';
+export const PLAYER_UNSUPPORTED_MESSAGE =
+  'This browser cannot play this recording. Download it to play it in another app.';
+export const TRANSCRIPT_FAILED_MESSAGE = 'Could not load the transcript. Please try again.';
 export const RETRY_FAILED_MESSAGE = 'Could not start processing again. Please try again.';
 /** A `409` on retry: the file is not `FAILED` any more (e.g. retried from another tab). */
 export const RETRY_CONFLICT_MESSAGE = 'This file is already being processed again.';
@@ -124,6 +128,12 @@ export const FILE_LINK_REUSE_MS = 4 * 60 * 1000;
 
 /** Image thumbnails request their link once the row is this close to the viewport. */
 export const THUMBNAIL_ROOT_MARGIN = '200px';
+
+/**
+ * After the user scrolls the transcript, it stops following the playback for this long, so the
+ * line they are reading is not pulled away from them.
+ */
+export const TRANSCRIPT_FOLLOW_PAUSE_MS = 5000;
 
 /** A repeated announcement is cleared first and set again after this delay, so it is re-read. */
 export const ANNOUNCEMENT_RESET_MS = 100;

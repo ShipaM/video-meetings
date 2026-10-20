@@ -82,3 +82,14 @@
   border: 1px solid color-mix(in oklch, var(--foreground) 10%, transparent);
   box-shadow: 0 24px 60px -20px oklch(0.3 0.1 280 / 0.35);
 }
+
+/*
+ * On phones Chrome's audio controls leave the timeline only a few pixels; the volume is set with
+ * the device's buttons there, so the mute button gives its width to the timeline.
+ */
+@media (width < 40rem) {
+  .recording-audio::-webkit-media-controls-mute-button,
+  .recording-audio::-webkit-media-controls-volume-control-container {
+    display: none;
+  }
+}
