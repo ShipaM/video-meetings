@@ -18,9 +18,16 @@ export default defineConfig({
       JOBS_POLLING_INTERVAL_SECONDS: '0.5',
       // Short, so the "hangs past the timeout" case ends quickly.
       DOCUMENT_PROCESSING_TIMEOUT_SECONDS: '3',
+      // A one-minute limit, so the over-limit recording is generated in a moment.
+      MAX_RECORDING_MINUTES: '1',
+      // A transcription timeout of seconds for the short test recordings (the hang case).
+      TRANSCRIPTION_TIMEOUT_MARGIN_SECONDS: '2',
       AI_PROVIDER: 'fake',
     },
     // Suites share one database.
     fileParallelism: false,
+    // Tests wait for background jobs (up to 20 s, `settled`), and a cold first ffmpeg or worker
+    // start on Windows can take seconds.
+    testTimeout: 30_000,
   },
 });
