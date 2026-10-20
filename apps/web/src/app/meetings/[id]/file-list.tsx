@@ -3,11 +3,24 @@
 import { AlertDialog, Button, Chip, Spinner } from '@heroui/react';
 import { useEffect, useId, useRef, useState } from 'react';
 import { clearAccessToken } from '../../auth-storage';
-import { formatFileSize, formatMeetingDate, type MeetingFile } from '../../meetings';
-import { ANNOUNCEMENT_RESET_MS, FILE_KIND_LABEL, FILE_STATUS } from './constants';
+import {
+  formatDuration,
+  formatFileSize,
+  formatMeetingDate,
+  type MeetingFile,
+} from '../../meetings';
+import {
+  ANNOUNCEMENT_RESET_MS,
+  FILE_KIND_LABEL,
+  FILE_STATUS,
+  PLAYER_FAILED_MESSAGE,
+  PREVIEW_FAILED_MESSAGE,
+  PROCESSING_TEXT,
+} from './constants';
 import { FilePreviewPanel, FileSummary, ImageThumbnail, useFileLink } from './file-preview';
 import { getExtension } from './file-types';
 import { deleteFile, downloadFile, retryProcessing } from './files-api';
+import { RecordingPanel } from './recording-player';
 import { UnmountListener } from './unmount-listener';
 import { useConfirmedRemoval } from './use-confirmed-removal';
 
@@ -109,9 +122,16 @@ function FileRow({ file, actions }: { file: MeetingFile; actions?: FileActions }
   const [isRetrying, setIsRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [isPlayerOpen, setIsPlayerOpen] = useState(false);
   const downloadButton = useRef<HTMLButtonElement>(null);
   const previewId = useId();
-  const preview = useFileLink(file.meetingId, file.id);
+  const playerId = useId();
+  // One link per row: a file is either previewable (PDF, image) or playable (audio, video).
+  const preview = useFileLink(
+    file.meetingId,
+    file.id,
+    file.playable ? PLAYER_FAILED_MESSAGE : PREVIEW_FAILED_MESSAGE,
+  );
   const hasThumbnail = file.kind === 'IMAGE' && file.previewable;
   const status = FILE_STATUS[file.status];
 
@@ -126,6 +146,12 @@ function FileRow({ file, actions }: { file: MeetingFile; actions?: FileActions }
     // A reopened preview gets a fresh link if the old one is about to expire.
     if (!isPreviewOpen) void preview.load();
     setIsPreviewOpen((open) => !open);
+  }
+
+  function togglePlayer() {
+    // The player keeps one link while it is open and replaces it itself when it stops working.
+    if (!isPlayerOpen) void preview.load();
+    setIsPlayerOpen((open) => !open);
   }
 
   async function handleRetry() {
@@ -162,7 +188,9 @@ function FileRow({ file, actions }: { file: MeetingFile; actions?: FileActions }
               </Chip>
             </div>
             <p className="text-muted text-sm">
-              {getTypeLabel(file)} · {formatFileSize(file.size)} ·{' '}
+              {getTypeLabel(file)}
+              {file.durationMs !== null && ` · ${formatDuration(file.durationMs)}`} ·{' '}
+              {formatFileSize(file.size)} ·{' '}
               <time dateTime={file.completedAt ?? file.createdAt}>
                 {formatMeetingDate(file.completedAt ?? file.createdAt)}
               </time>
@@ -186,6 +214,24 @@ function FileRow({ file, actions }: { file: MeetingFile; actions?: FileActions }
                 </span>
               ) : (
                 'Preview'
+              )}
+            </Button>
+          )}
+          {file.playable && (
+            <Button
+              variant="tertiary"
+              className={actionButtonClass}
+              aria-label={`${isPlayerOpen ? 'Hide player of' : 'Play'} ${file.originalName}`}
+              aria-expanded={isPlayerOpen}
+              aria-controls={isPlayerOpen ? playerId : undefined}
+              onPress={togglePlayer}
+            >
+              {isPlayerOpen ? (
+                <span>
+                  Hide<span className="hidden sm:inline"> player</span>
+                </span>
+              ) : (
+                'Play'
               )}
             </Button>
           )}
@@ -216,8 +262,7 @@ function FileRow({ file, actions }: { file: MeetingFile; actions?: FileActions }
 
       {file.status === 'PROCESSING' && (
         <p className="text-muted text-sm">
-          {file.kind === 'DOCUMENT' ? 'Summarizing the document.' : 'Processing the file.'} The
-          status updates by itself.
+          {PROCESSING_TEXT[file.kind]} The status updates by itself.
         </p>
       )}
       {file.status === 'FAILED' && (
@@ -233,6 +278,7 @@ function FileRow({ file, actions }: { file: MeetingFile; actions?: FileActions }
       )}
       {file.status === 'READY' && file.summary !== null && <FileSummary summary={file.summary} />}
       {isPreviewOpen && <FilePreviewPanel id={previewId} file={file} preview={preview} />}
+      {isPlayerOpen && <RecordingPanel id={playerId} file={file} link={preview} playOnOpen />}
     </li>
   );
 }

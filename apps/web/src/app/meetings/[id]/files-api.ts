@@ -1,6 +1,6 @@
 import { authorizedFetch } from '../../api';
 import { API_URL, SERVER_UNAVAILABLE_MESSAGE } from '../../constants';
-import type { MeetingFile } from '../../meetings';
+import type { MeetingFile, MeetingFileDetails, TranscriptSegment } from '../../meetings';
 import type { RemovalResult } from './use-confirmed-removal';
 import {
   DELETE_FAILED_MESSAGE,
@@ -8,6 +8,7 @@ import {
   FILE_GONE_MESSAGE,
   RETRY_CONFLICT_MESSAGE,
   RETRY_FAILED_MESSAGE,
+  TRANSCRIPT_FAILED_MESSAGE,
 } from './constants';
 
 /** A short-lived signed link to a file's content: an absolute URL and when it arrived. */
@@ -40,9 +41,28 @@ export async function requestFileLink(
   }
 }
 
-/** The link's URL served inline (PDF, PNG, JPEG), for an `<img>` or `<iframe>` preview. */
+/**
+ * The link's URL served inline: whole for an `<img>` or `<iframe>` preview (PDF, PNG, JPEG), with
+ * byte ranges for the audio or video player.
+ */
 export function inlineUrl(link: FileLink): string {
   return `${link.url}&disposition=inline`;
+}
+
+/**
+ * Whether the API still serves the link's content: `ok`, `gone` (`404`, access ended) or `error`.
+ * Only the status is read; the (possibly large) body is cancelled at once.
+ */
+export async function probeFileLink(link: FileLink): Promise<'ok' | 'gone' | 'error'> {
+  const controller = new AbortController();
+  try {
+    const response = await fetch(inlineUrl(link), { signal: controller.signal, cache: 'no-store' });
+    controller.abort();
+    if (response.ok) return 'ok';
+    return response.status === 404 ? 'gone' : 'error';
+  } catch {
+    return 'error';
+  }
 }
 
 /**
@@ -62,6 +82,35 @@ export async function downloadFile(file: MeetingFile): Promise<string | null> {
   link.click();
   link.remove();
   return null;
+}
+
+export type TranscriptResult =
+  /** `null`: the recording has no transcript (not `READY`, or processed without one). */
+  | { type: 'transcript'; transcript: TranscriptSegment[] | null }
+  | { type: 'error'; message: string }
+  | { type: 'unauthorized' };
+
+/**
+ * Loads a recording's transcript from the file details route; the files list leaves it out,
+ * since a long meeting has thousands of segments.
+ */
+export async function fetchTranscript(
+  file: Pick<MeetingFile, 'id' | 'meetingId'>,
+  signal?: AbortSignal,
+): Promise<TranscriptResult> {
+  try {
+    const response = await authorizedFetch(`/meetings/${file.meetingId}/files/${file.id}`, {
+      signal,
+    });
+    if (!response) return { type: 'unauthorized' };
+    if (response.status === 404) return { type: 'error', message: FILE_GONE_MESSAGE };
+    if (!response.ok) return { type: 'error', message: TRANSCRIPT_FAILED_MESSAGE };
+    const details = (await response.json()) as MeetingFileDetails;
+    return { type: 'transcript', transcript: details.transcript };
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    return { type: 'error', message: SERVER_UNAVAILABLE_MESSAGE };
+  }
 }
 
 export type RetryResult =

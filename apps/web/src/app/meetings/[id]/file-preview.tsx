@@ -12,11 +12,15 @@ import {
 import { type FileLink, inlineUrl, requestFileLink } from './files-api';
 
 /**
- * A signed link to the file for previews. `load()` reuses the current link while it is young
+ * A signed link to the file for previews and the player. `load()` reuses the current link while it is young
  * enough and otherwise asks for a new one (`force` always does); overlapping calls send one
  * request. A failed request drops the old link, so an expired one is never shown with the error.
  */
-export function useFileLink(meetingId: string, fileId: string) {
+export function useFileLink(
+  meetingId: string,
+  fileId: string,
+  failedMessage = PREVIEW_FAILED_MESSAGE,
+) {
   const [link, setLink] = useState<FileLink | null>(null);
   const [error, setError] = useState<string | null>(null);
   const linkRef = useRef<FileLink | null>(null);
@@ -30,7 +34,7 @@ export function useFileLink(meetingId: string, fileId: string) {
       }
       pending.current ??= (async () => {
         setError(null);
-        const result = await requestFileLink({ meetingId, id: fileId }, PREVIEW_FAILED_MESSAGE);
+        const result = await requestFileLink({ meetingId, id: fileId }, failedMessage);
         pending.current = null;
         if (result.type === 'link') {
           linkRef.current = result.link;
@@ -44,7 +48,7 @@ export function useFileLink(meetingId: string, fileId: string) {
       })();
       return pending.current;
     },
-    [meetingId, fileId],
+    [meetingId, fileId, failedMessage],
   );
 
   return { link, error, load };
@@ -144,6 +148,20 @@ export function ImageThumbnail({
   );
 }
 
+/** An error in a preview or player panel, with Try again next to it. */
+export function PanelError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <p role="alert" className="text-danger flex-1 text-sm">
+        {message}
+      </p>
+      <Button size="sm" variant="secondary" className="min-h-11 sm:min-h-9" onPress={onRetry}>
+        Try again
+      </Button>
+    </div>
+  );
+}
+
 /** The opened preview of a PDF or an image, below its row. */
 export function FilePreviewPanel({
   id,
@@ -185,21 +203,7 @@ export function FilePreviewPanel({
 
   return (
     <div id={id} className="border-default flex flex-col gap-3 rounded-xl border p-3">
-      {shownError !== null && (
-        <div className="flex flex-wrap items-center gap-3">
-          <p role="alert" className="text-danger flex-1 text-sm">
-            {shownError}
-          </p>
-          <Button
-            size="sm"
-            variant="secondary"
-            className="min-h-11 sm:min-h-9"
-            onPress={() => void load(true)}
-          >
-            Try again
-          </Button>
-        </div>
-      )}
+      {shownError !== null && <PanelError message={shownError} onRetry={() => void load(true)} />}
       {shownError === null && link === null && (
         <Skeleton
           className="h-64 rounded-lg sm:h-96"

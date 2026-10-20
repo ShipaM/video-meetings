@@ -173,10 +173,10 @@ rules.
 **Affects:** frontend
 **Tasks**
 
-- [ ] Built-in audio and video player using the signed streaming URL.
-- [ ] Transcript with timestamps and the summary for each processed recording.
-- [ ] `ui-ux-pro-max` + Playwright MCP visual check (owner and participant, phone width).
-- [ ] Final check from the repository root: lint, type check, unit and e2e tests green.
+- [x] Built-in audio and video player using the signed streaming URL.
+- [x] Transcript with timestamps and the summary for each processed recording.
+- [x] `ui-ux-pro-max` + Playwright MCP visual check (owner and participant, phone width).
+- [x] Final check from the repository root: lint, type check, unit and e2e tests green.
       **Done when:** an uploaded MP3 and MP4 move from Processing to Ready without reload and the page shows a working
       player, the transcript with timestamps and the summary, for both the owner and a participant.
 
