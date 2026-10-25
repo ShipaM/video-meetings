@@ -1,0 +1,6 @@
+{
+  "milestone": "User profile — Phase 1: API tracer bullet — profile with a display name",
+  "branch": "feature/user-profile-p1",
+  "base": "master",
+  "prompt": "Read .claude/ralph.md and follow its instructions. Implement issue #{issue} from milestone '{milestone}' in branch '{branch}'."
+}

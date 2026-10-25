@@ -47,6 +47,10 @@ Target one workspace with `npm run <script> --workspace=web|api`.
 
 Husky (`.husky/pre-commit`, installed by the root `prepare` script on `npm install`) runs `lint-staged` and then `npm test` before every commit. `lint-staged.config.mjs` runs ESLint `--fix` (through the owning workspace) and Prettier on the staged files. Bypass in an emergency with `git commit --no-verify`.
 
+## Ralph loop
+
+An autonomous loop that implements the open issues of one GitHub milestone. `.claude/ralph.config.json` names the milestone, the working branch, the PR base and the per-issue prompt; `.claude/ralph.md` holds the rules the agent follows. The Stop hook `.claude/hooks/ralph-stop.mjs` (registered in `.claude/settings.json`) runs only when the session was started with `RALPH=1` (PowerShell: `$env:RALPH=1; claude --permission-mode acceptEdits`): it hands the agent the oldest open issue, ends the loop when an issue is still open after its iteration (state in the git-ignored `.claude/ralph.state.json`), and pushes the branch and opens the pull request once the milestone has no open issues.
+
 ## MCP
 
 `.mcp.json` in the root registers the project-scoped Playwright MCP server (`npx @playwright/mcp@0.0.83`, started via `cmd /c` on Windows) for browser automation. Claude Code asks to approve it on first use; on macOS/Linux change the command to plain `npx`. The version is pinned on purpose: with `@latest` npx checks the registry on every start, which takes 15-40 s on Windows and often exceeds the 30 s MCP connection timeout. Bump it deliberately.
