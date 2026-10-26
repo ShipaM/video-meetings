@@ -49,11 +49,16 @@ Husky (`.husky/pre-commit`, installed by the root `prepare` script on `npm insta
 
 ## Ralph loop
 
-An autonomous loop that implements the open issues of one GitHub milestone. `.claude/ralph.config.json` names the milestone, the working branch, the PR base and the per-issue prompt; `.claude/ralph.md` holds the rules the agent follows. The Stop hook `.claude/hooks/ralph-stop.mjs` (registered in `.claude/settings.json`) runs only when the session was started with `RALPH=1` (PowerShell: `$env:RALPH=1; claude --permission-mode acceptEdits`): it hands the agent the oldest open issue, ends the loop when an issue is still open after its iteration (state in the git-ignored `.claude/ralph.state.json`), and pushes the branch and opens the pull request once the milestone has no open issues.
+An autonomous loop that implements the open issues of GitHub milestones. `.claude/ralph.config.json` lists the `phases` (milestone and working branch each), the PR `base`, the per-issue prompt (`{issue}`, `{milestone}`, `{branch}` placeholders), `maxIterations` (issues per phase run) and `maxTurns` (per issue); `.claude/ralph.md` holds the rules the agent follows.
+
+- `npm run ralph -- <phase>` (`scripts/ralph.mjs`, 1-based; without a number the first phase with open issues) switches to the phase branch (created from `origin/<base>` if missing), starts one `claude -p --permission-mode acceptEdits` run per issue, oldest first, and streams its progress. It stops when an issue is still open after its run, and pushes the branch and opens the pull request into `base` once the milestone has no open issues.
+- `npm run ralph:all` (`scripts/ralph-all.mjs`) runs every phase in order with `--merge`: each phase's pull request is merged into `base` without review before the next phase starts. It stops at the first phase that does not finish; run it again to resume.
+
+The agent runs load only the project MCP servers (`--strict-mcp-config`). In `-p` mode tools that `.claude/settings.json` does not allow are denied silently.
 
 ## MCP
 
-`.mcp.json` in the root registers the project-scoped Playwright MCP server (`npx @playwright/mcp@0.0.83`, started via `cmd /c` on Windows) for browser automation. Claude Code asks to approve it on first use; on macOS/Linux change the command to plain `npx`. The version is pinned on purpose: with `@latest` npx checks the registry on every start, which takes 15-40 s on Windows and often exceeds the 30 s MCP connection timeout. Bump it deliberately.
+`.mcp.json` in the root registers the project-scoped Playwright MCP server for browser automation. It runs `node node_modules/@playwright/mcp/cli.js` from the root devDependency `@playwright/mcp` (exact version), so start Claude Code from the repository root. Claude Code asks to approve it on first use. It is not started through `npx` on purpose: npx resolution takes about 10 s per start on Windows (the server itself about 1 s), and with several npx-based servers starting in parallel it often exceeds the 30 s MCP connection timeout. Bump the version deliberately.
 
 ## Keeping documentation up to date
 

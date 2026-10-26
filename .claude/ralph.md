@@ -1,7 +1,7 @@
 # Ralph loop - rules for autonomous work
 
-The Stop hook (`.claude/hooks/ralph-stop.mjs`) hands you one issue per iteration. Implement exactly that issue,
-then stop; the hook gives you the next one.
+The runner (`scripts/ralph.mjs`) hands you one issue per run. Implement exactly that issue, then stop; the
+runner starts a new run for the next one.
 
 ### 1. Issues
 
@@ -21,7 +21,7 @@ then stop; the hook gives you the next one.
 - Run the affected tests after every change (`npm run test`, plus `npm run test:e2e --workspace=api` for API
   routes; e2e needs `npm run db:up`).
 - If the tests are still red after five attempts, stop: write an issue comment
-  (`gh issue comment <number>`) that describes the problem and leave the issue open. The hook then ends the loop.
+  (`gh issue comment <number>`) that describes the problem and leave the issue open. The runner then ends the loop.
 
 ### 4. Finishing the issue
 
@@ -29,4 +29,4 @@ then stop; the hook gives you the next one.
 - Every requirement of the issue is met.
 - Run the `code-review` skill on your changes and fix what it finds.
 - Commit, then close the issue: `gh issue close <number> --comment "<short summary>"`.
-- Do not push and do not create a pull request: the Stop hook does it when the milestone has no open issues.
+- Do not push and do not create a pull request: the runner does it when the milestone has no open issues.
