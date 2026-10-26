@@ -7,3 +7,10 @@ export interface UserRecord {
 
 /** The public part of a user (no password hash), for showing users to other users. */
 export type UserContact = Pick<UserRecord, 'id' | 'email'>;
+
+/** The signed-in user's own profile, safe for HTTP responses. `avatar` stays `null` until avatars exist. */
+export interface UserProfile {
+  email: string;
+  name: string | null;
+  avatar: null;
+}

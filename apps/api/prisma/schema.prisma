@@ -13,6 +13,8 @@ model User {
   id           String               @id @default(uuid())
   email        String               @unique
   passwordHash String
+  // Display name; null when the user has not set one.
+  name         String?
   createdAt    DateTime             @default(now())
   updatedAt    DateTime             @updatedAt
   meetings     Meeting[]

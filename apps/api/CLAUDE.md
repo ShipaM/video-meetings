@@ -34,11 +34,11 @@ Standard Nest module/controller/service layout:
 - `src/config/env.ts` - `numberEnv(name, fallback, min)`: numeric settings, a bad value fails at startup
 - `src/jobs/` - global `JobsModule` / `JobsService`: the app's single pg-boss instance (background jobs and schedules, see Background processing)
 - `src/auth/` - `AuthModule`: `POST /auth/register` and `POST /auth/login`, token issuing and `JwtAuthGuard` (see below)
-- `src/users/` - `UsersModule`: creating and looking up users, no HTTP routes yet (see below)
+- `src/users/` - `UsersModule`: creating and looking up users, the caller's profile `GET` / `PATCH /users/me` (see below)
 - `src/meetings/` - `MeetingsModule`: meetings and their participants, `/meetings[/:id[/participants]]` (see below)
 - `src/meeting-files/` - `MeetingFilesModule`: resumable upload (tus), file list and details, signed downloads and streaming, background processing of documents and recordings (see below)
 - `prisma/schema.prisma`, `prisma/migrations/`, `prisma.config.ts` - Prisma schema (`User`, `Meeting`, `MeetingParticipant`, `MeetingFile`, `MeetingFileSummary`, `TranscriptSegment`), migrations and CLI config
-- `test/auth.e2e-spec.ts`, `test/meetings.e2e-spec.ts`, `test/meeting-files.e2e-spec.ts`, `test/meeting-participants.e2e-spec.ts`, `test/meeting-file-processing.e2e-spec.ts`, `test/meeting-file-transcription.e2e-spec.ts` - e2e tests using supertest against the Nest app and the real database (written first, TDD); `test/tus.helpers.ts` - tus metadata, fake MP4, interrupted PATCH, binary body parser; `test/media.helpers.ts` - `makeRecording` writes small genuine MP3 / MP4 files (tone, silence or no sound) with the app's ffmpeg on every run, so no media is committed; `test/fixtures/` - small genuine PDF, DOCX, PPTX and TXT documents (marked `binary` in their `.gitattributes`: a PDF's xref offsets break if line endings change)
+- `test/auth.e2e-spec.ts`, `test/profile.e2e-spec.ts`, `test/meetings.e2e-spec.ts`, `test/meeting-files.e2e-spec.ts`, `test/meeting-participants.e2e-spec.ts`, `test/meeting-file-processing.e2e-spec.ts`, `test/meeting-file-transcription.e2e-spec.ts` - e2e tests using supertest against the Nest app and the real database (written first, TDD); `test/tus.helpers.ts` - tus metadata, fake MP4, interrupted PATCH, binary body parser; `test/media.helpers.ts` - `makeRecording` writes small genuine MP3 / MP4 files (tone, silence or no sound) with the app's ffmpeg on every run, so no media is committed; `test/fixtures/` - small genuine PDF, DOCX, PPTX and TXT documents (marked `binary` in their `.gitattributes`: a PDF's xref offsets break if line endings change)
 - `src/**/handlers/*.handler.spec.ts` - unit tests of the CQRS handlers (Prisma and the buses are mocked)
 - `scripts/upload-check.mjs`, `scripts/processing-check.mjs` - manual checks against a running API: large upload, summaries and transcripts (not part of any test run)
 
@@ -46,21 +46,21 @@ Standard Nest module/controller/service layout:
 
 `AppModule` imports `CqrsModule.forRoot()` (global `CommandBus` / `QueryBus`), `PrismaModule` and `JobsModule` (both global) and the four feature modules:
 
-| Module               | Responsibility                                                                | Public surface                                                                                                                             | Talks to                                                                                              |
-| -------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
-| `AuthModule`         | registration, login, password hashing, JWT issuing and verification           | `POST /auth/register`, `POST /auth/login`, `JwtAuthGuard`, `JwtModule`                                                                     | Users, through `CreateUserCommand` / `FindUserByEmailQuery`                                           |
-| `UsersModule`        | the `User` table: creating and looking users up (profile etc. will live here) | CQRS messages from `src/users/index.ts`, no HTTP routes yet                                                                                | Prisma only                                                                                           |
-| `MeetingsModule`     | meetings, their participants and the access rules (owner / participant)       | `/meetings`, `/meetings/:id`, `/meetings/:id/participants[/:userId]`; `GetMeetingQuery` (`src/meetings/index.ts`)                          | imports `AuthModule` for `JwtAuthGuard`; Users through `FindUserByEmailQuery` / `FindUsersByIdsQuery` |
-| `MeetingFilesModule` | the `MeetingFile` table and the files on disk (`FILES_DIR`)                   | `/uploads` (tus), `GET` / `DELETE /meetings/:id/files[/:fileId]`, `POST .../files/:fileId/retry` and `/link`, `GET /files/:fileId/content` | Meetings, through `GetMeetingQuery` (access rules); `AuthModule` for the guard and `JwtService`       |
+| Module               | Responsibility                                                          | Public surface                                                                                                                             | Talks to                                                                                              |
+| -------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| `AuthModule`         | registration, login, password hashing, JWT issuing and verification     | `POST /auth/register`, `POST /auth/login`, `JwtAuthGuard`, `JwtModule`                                                                     | Users, through `CreateUserCommand` / `FindUserByEmailQuery`                                           |
+| `UsersModule`        | the `User` table: creating and looking users up, the caller's profile   | `GET` / `PATCH /users/me`; CQRS messages from `src/users/index.ts`                                                                         | Prisma; imports `AuthModule` for `JwtAuthGuard` only                                                  |
+| `MeetingsModule`     | meetings, their participants and the access rules (owner / participant) | `/meetings`, `/meetings/:id`, `/meetings/:id/participants[/:userId]`; `GetMeetingQuery` (`src/meetings/index.ts`)                          | imports `AuthModule` for `JwtAuthGuard`; Users through `FindUserByEmailQuery` / `FindUsersByIdsQuery` |
+| `MeetingFilesModule` | the `MeetingFile` table and the files on disk (`FILES_DIR`)             | `/uploads` (tus), `GET` / `DELETE /meetings/:id/files[/:fileId]`, `POST .../files/:fileId/retry` and `/link`, `GET /files/:fileId/content` | Meetings, through `GetMeetingQuery` (access rules); `AuthModule` for the guard and `JwtService`       |
 
-Dependencies point one way: MeetingFiles -> (buses) -> Meetings -> (buses) -> Users, and Meetings -> Auth -> (buses) -> Users. Users knows nothing about Auth or Meetings, Meetings nothing about files.
+Dependencies point one way: MeetingFiles -> (buses) -> Meetings -> (buses) -> Users, and Meetings -> Auth -> (buses) -> Users. Users imports `AuthModule` only for the guard (Auth never imports Users, it uses the buses) and knows nothing about Meetings, Meetings nothing about files.
 
 Layout of a feature module (Auth, Users, Meetings and MeetingFiles follow it):
 
 ```
 src/<module>/
   <module>.module.ts        # providers: [...CommandHandlers, ...QueryHandlers]
-  <module>.controller.ts    # Auth, Meetings, MeetingFiles; builds messages, dispatches them
+  <module>.controller.ts    # Auth, Users, Meetings, MeetingFiles; builds messages, dispatches them
   dto/                      # class-validator request bodies
   commands/  <name>.command.ts, handlers/<name>.handler.ts (+ .spec.ts), index.ts
   queries/   <name>.query.ts,   handlers/<name>.handler.ts (+ .spec.ts), index.ts
@@ -84,14 +84,23 @@ A global `ValidationPipe` (`whitelist: true`) is registered in `src/main.ts` and
 
 ## Users
 
-`UsersModule` owns the `User` table; no other module touches `prisma.user`. It has no controller, it is reached only through CQRS messages, which are exported from `src/users/index.ts` (the module's public API):
+`UsersModule` owns the `User` table; no other module touches `prisma.user`. `UsersController` serves the caller's own profile (bearer token, `JwtAuthGuard`; `401` without one):
 
-| Message                          | Result                                                                                         |
-| -------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `CreateUserCommand(email, hash)` | the stored `UserRecord`; lower-cases the e-mail, `409 ConflictException` when it is taken      |
-| `FindUserByEmailQuery(email)`    | `UserRecord` or `null`; the lookup is case-insensitive (the e-mail is lower-cased)             |
-| `FindUserByIdQuery(id)`          | `UserRecord` or `null`                                                                         |
-| `FindUsersByIdsQuery(ids)`       | `UserContact[]` (`id`, `email`, no hash; unknown ids left out); one query, participant e-mails |
+| Route             | Behaviour                                                                                                                                                           |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /users/me`   | `200 { email, name, avatar }` (`UserProfile`; `name` and `avatar` are `null` until set, `avatar` is always `null` for now), never the password hash                 |
+| `PATCH /users/me` | body `{ name? }` (`UpdateProfileDto`): trimmed, at most 50 characters after trimming (else `400`, nothing saved); empty or spaces only stores `null`; `200` profile |
+
+Other modules reach Users only through CQRS messages, which are exported from `src/users/index.ts` (the module's public API):
+
+| Message                               | Result                                                                                                     |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `CreateUserCommand(email, hash)`      | the stored `UserRecord`; lower-cases the e-mail, `409 ConflictException` when it is taken                  |
+| `FindUserByEmailQuery(email)`         | `UserRecord` or `null`; the lookup is case-insensitive (the e-mail is lower-cased)                         |
+| `FindUserByIdQuery(id)`               | `UserRecord` or `null`                                                                                     |
+| `FindUsersByIdsQuery(ids)`            | `UserContact[]` (`id`, `email`, no hash; unknown ids left out); one query, participant e-mails             |
+| `GetProfileQuery(userId)`             | `UserProfile` (`email`, `name`, `avatar`); `404` for an unknown user                                       |
+| `UpdateProfileCommand(userId, name?)` | the updated `UserProfile`; trims the name, empty or `null` clears it, omitted keeps it; `404` unknown user |
 
 `UserRecord` (`id`, `email`, `passwordHash`) is internal: never return it from a controller. Queries that serve other users' data return `UserContact` (`id`, `email`) instead, so the hash is never even loaded. Profile and other user features go into this module.
 
@@ -224,7 +233,7 @@ Two kinds of tests, both on Vitest (`globals: true`, so `describe` / `it` / `vi`
 | Kind | Files                | Config                 | Needs                                 | What it covers                                                                                                                                                                                                                                     |
 | ---- | -------------------- | ---------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Unit | `src/**/*.spec.ts`   | `vitest.config.ts`     | nothing (Prisma and the buses mocked) | each CQRS handler in isolation (Auth, Users, Meetings, MeetingFiles), the file type allow-list, text extraction (fixtures), the Ollama adapter (mocked `fetch`), ffprobe / ffmpeg on generated recordings, child processes, whisper output parsing |
-| e2e  | `test/*.e2e-spec.ts` | `vitest.config.e2e.ts` | the database, `.env`                  | the whole Nest app over HTTP with supertest: `/auth/*`, `/meetings*` (incl. participants, access rules and document processing), `/uploads`, `/files/*`                                                                                            |
+| e2e  | `test/*.e2e-spec.ts` | `vitest.config.e2e.ts` | the database, `.env`                  | the whole Nest app over HTTP with supertest: `/auth/*`, `/users/me`, `/meetings*` (incl. participants, access rules and document processing), `/uploads`, `/files/*`                                                                               |
 
 ### Running unit tests
 
