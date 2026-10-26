@@ -1,9 +1,40 @@
 {
-  "active": false,
-  "milestone": "User profile — Phase 1: API tracer bullet — profile with a display name",
-  "maxIterations": 1,
-  "maxTurns": 50,
-  "branch": "feature/user-profile-p1",
   "base": "master",
-  "prompt": "Read .claude/ralph.md and follow its instructions. Implement issue #{issue} from milestone '{milestone}' in branch '{branch}'."
+  "maxIterations": 5,
+  "maxTurns": 50,
+  "prompt": "Read .claude/ralph.md and follow its instructions. Implement issue #{issue} from milestone '{milestone}' in branch '{branch}'.",
+  "phases": [
+    {
+      "milestone": "User profile — Phase 1: API tracer bullet — profile with a display name",
+      "branch": "feature/user-profile-p1"
+    },
+    {
+      "milestone": "User profile — Phase 2: UI — profile page, name editing and the header",
+      "branch": "feature/user-profile-p2"
+    },
+    {
+      "milestone": "User profile — Phase 3: API — change password",
+      "branch": "feature/user-profile-p3"
+    },
+    {
+      "milestone": "User profile — Phase 4: UI — change password form",
+      "branch": "feature/user-profile-p4"
+    },
+    {
+      "milestone": "User profile — Phase 5: API — avatar upload through tus",
+      "branch": "feature/user-profile-p5"
+    },
+    {
+      "milestone": "User profile — Phase 6: API — set, remove and deliver the avatar",
+      "branch": "feature/user-profile-p6"
+    },
+    {
+      "milestone": "User profile — Phase 7: API — cleanup of abandoned and unattached avatars",
+      "branch": "feature/user-profile-p7"
+    },
+    {
+      "milestone": "User profile — Phase 8: UI — avatar picker, profile and header avatar",
+      "branch": "feature/user-profile-p8"
+    }
+  ]
 }

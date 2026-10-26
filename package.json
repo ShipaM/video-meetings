@@ -24,9 +24,12 @@
     "test": "npm run test --workspaces --if-present",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down",
+    "ralph": "node scripts/ralph.mjs",
+    "ralph:all": "node scripts/ralph-all.mjs",
     "prepare": "husky"
   },
   "devDependencies": {
+    "@playwright/mcp": "0.0.83",
     "concurrently": "^9.0.0",
     "husky": "^9.1.7",
     "lint-staged": "^17.6.0",
