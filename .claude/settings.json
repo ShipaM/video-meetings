@@ -1,11 +1,12 @@
 {
+  "enabledMcpjsonServers": ["playwright"],
   "hooks": {
     "Stop": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/ralph-stop.mjs\"",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/stop.mjs\"",
             "timeout": 120
           }
         ]
