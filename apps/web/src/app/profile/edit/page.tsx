@@ -33,7 +33,8 @@ import {
 type LoadState = { type: 'loading' } | { type: 'error'; message: string } | { type: 'ready' };
 
 function getNameError(value: string): string | null {
-  return value.trim().length > PROFILE_NAME_MAX_LENGTH ? PROFILE_NAME_TOO_LONG_MESSAGE : null;
+  // Code points, like the API's `@MaxLength`: an emoji counts as one character.
+  return [...value.trim()].length > PROFILE_NAME_MAX_LENGTH ? PROFILE_NAME_TOO_LONG_MESSAGE : null;
 }
 
 /** The API's reason for a `400`: a string, or the first entry of a validation list. */
@@ -72,6 +73,11 @@ function ProfileEditContent() {
   const [error, setError] = useState<string | null>(null);
   const [isPending, setIsPending] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
+  const saveControllerRef = useRef<AbortController | null>(null);
+
+  // Next.js keeps this page's state when it is left; the cleanup also runs then, so a save still in
+  // flight never navigates away from the page the user went to.
+  useEffect(() => () => saveControllerRef.current?.abort(), []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -86,7 +92,11 @@ function ProfileEditContent() {
           return;
         }
         const profile = (await response.json()) as Profile;
+        // A return visit starts from the saved name, not the edits and errors left from the last one.
         setName(profile.name ?? '');
+        setTouched(false);
+        setNameServerError(null);
+        setError(null);
         setLoadState({ type: 'ready' });
       } catch {
         if (controller.signal.aborted) return;
@@ -116,6 +126,8 @@ function ProfileEditContent() {
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    // Enter in the field submits even while the Save button is pending.
+    if (isPending) return;
     setTouched(true);
 
     if (getNameError(name)) {
@@ -126,6 +138,8 @@ function ProfileEditContent() {
     setIsPending(true);
     setError(null);
     setNameServerError(null);
+    const controller = new AbortController();
+    saveControllerRef.current = controller;
 
     try {
       // An empty name clears it; the API trims as well.
@@ -133,6 +147,7 @@ function ProfileEditContent() {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: name.trim() }),
+        signal: controller.signal,
       });
       if (!response) return;
       if (response.status === 400) {
@@ -144,8 +159,10 @@ function ProfileEditContent() {
         setError(PROFILE_SAVE_FAILED_MESSAGE);
         return;
       }
-      router.push('/profile');
+      // Replace, so Back from /profile does not return to the form that was just saved.
+      router.replace('/profile');
     } catch {
+      if (controller.signal.aborted) return;
       setError(SERVER_UNAVAILABLE_MESSAGE);
     } finally {
       setIsPending(false);
