@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 import { clearAccessToken, useAccessToken } from '../auth-storage';
 import { API_URL, SERVER_UNAVAILABLE_MESSAGE } from '../constants';
 import { getDisplayName, type Profile } from '../profile';
+import { PROFILE_LOAD_FAILED_MESSAGE } from './constants';
 
 type ProfileState =
   { type: 'loading' } | { type: 'error'; message: string } | { type: 'ready'; profile: Profile };
@@ -45,7 +46,7 @@ function ProfileContent({ token }: { token: string }) {
           return;
         }
         if (!response.ok) {
-          setState({ type: 'error', message: 'Could not load your profile.' });
+          setState({ type: 'error', message: PROFILE_LOAD_FAILED_MESSAGE });
           return;
         }
         setState({ type: 'ready', profile: (await response.json()) as Profile });
