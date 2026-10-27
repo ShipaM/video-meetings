@@ -13,6 +13,19 @@ const { base, maxIterations, maxTurns } = config;
 const gh = (...args) => execFileSync('gh', args, { encoding: 'utf8' });
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
 
+// fetch / pull can fail on a ref another git process (e.g. the editor) holds for a moment: retry.
+function gitRemote(...args) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return git(...args);
+    } catch (error) {
+      if (attempt === 3) throw error;
+      console.log(`⚠ git ${args[0]} failed, retrying in 5 s...`);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5000);
+    }
+  }
+}
+
 // Oldest open issue first: issues are numbered in the order the plan was written.
 const openIssues = (milestone) =>
   JSON.parse(
@@ -107,7 +120,7 @@ if (issues.length > 0) {
   if (branchExists(branch)) {
     git('switch', branch);
   } else {
-    git('fetch', 'origin', base);
+    gitRemote('fetch', 'origin', base);
     git('switch', '-c', branch, `origin/${base}`);
   }
 }
@@ -136,7 +149,7 @@ for (let iteration = 1; issues.length > 0; iteration++) {
 }
 
 // A phase merged earlier has no local branch or no commits ahead of base: nothing to ship.
-git('fetch', 'origin', base);
+gitRemote('fetch', 'origin', base);
 if (!branchExists(branch) || git('rev-list', '--count', `origin/${base}..${branch}`) === '0') {
   console.log(`✅ Phase ${index + 1} has nothing left to ship.`);
   process.exit(0);
@@ -154,5 +167,5 @@ if (merge) {
   console.log(`🔀 Merging the PR into ${base}...`);
   gh('pr', 'merge', branch, '--merge');
   git('switch', base);
-  git('pull', '--ff-only', 'origin', base);
+  gitRemote('pull', '--ff-only', 'origin', base);
 }
