@@ -17,7 +17,7 @@ import {
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { authorizedFetch } from '../../api';
+import { authorizedFetch, readErrorMessage } from '../../api';
 import { useAccessToken } from '../../auth-storage';
 import { SERVER_UNAVAILABLE_MESSAGE } from '../../constants';
 import type { Profile } from '../../profile';
@@ -29,23 +29,13 @@ import {
   PROFILE_NAME_TOO_LONG_MESSAGE,
   PROFILE_SAVE_FAILED_MESSAGE,
 } from '../constants';
+import { ChangePasswordForm, isChangePasswordTarget } from './change-password-form';
 
 type LoadState = { type: 'loading' } | { type: 'error'; message: string } | { type: 'ready' };
 
 function getNameError(value: string): string | null {
   // Code points, like the API's `@MaxLength`: an emoji counts as one character.
   return [...value.trim()].length > PROFILE_NAME_MAX_LENGTH ? PROFILE_NAME_TOO_LONG_MESSAGE : null;
-}
-
-/** The API's reason for a `400`: a string, or the first entry of a validation list. */
-async function readErrorMessage(response: Response): Promise<string | null> {
-  try {
-    const { message } = (await response.json()) as { message?: unknown };
-    const first: unknown = Array.isArray(message) ? message[0] : message;
-    return typeof first === 'string' && first ? first : null;
-  } catch {
-    return null;
-  }
 }
 
 export default function ProfileEditPage() {
@@ -109,7 +99,8 @@ function ProfileEditContent() {
   }, [attempt]);
 
   useEffect(() => {
-    if (loadState.type === 'ready') nameRef.current?.focus();
+    // Opened through Change password: the password form has the focus.
+    if (loadState.type === 'ready' && !isChangePasswordTarget()) nameRef.current?.focus();
   }, [loadState.type]);
 
   function handleRetry() {
@@ -170,7 +161,7 @@ function ProfileEditContent() {
   }
 
   return (
-    <main className="flex flex-1 items-center justify-center p-4 sm:p-6">
+    <main className="flex flex-1 flex-col items-center justify-center gap-6 p-4 sm:p-6">
       <Card className="glass-card w-full max-w-md rounded-3xl p-6 sm:p-8">
         <Card.Header className="gap-1">
           <Card.Title className="text-2xl font-semibold">Edit profile</Card.Title>
@@ -263,6 +254,7 @@ function ProfileEditContent() {
           )}
         </Card.Content>
       </Card>
+      <ChangePasswordForm />
     </main>
   );
 }

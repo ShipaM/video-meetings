@@ -24,3 +24,14 @@ export async function authorizedFetch(
   }
   return response;
 }
+
+/** The API's reason for an error: a string, or the first entry of a validation list. */
+export async function readErrorMessage(response: Response): Promise<string | null> {
+  try {
+    const { message } = (await response.json()) as { message?: unknown };
+    const first: unknown = Array.isArray(message) ? message[0] : message;
+    return typeof first === 'string' && first ? first : null;
+  } catch {
+    return null;
+  }
+}

@@ -16,7 +16,7 @@ import { useRouter } from 'next/navigation';
 import { useRef, useState } from 'react';
 import { setAccessToken } from '../auth-storage';
 import { API_URL, EMAIL_MAX_LENGTH, EMAIL_PATTERN, SERVER_UNAVAILABLE_MESSAGE } from '../constants';
-import { PasswordField } from '../password-field';
+import { getPasswordLengthError, PasswordField } from '../password-field';
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from './constants';
 
 type Status = { type: 'idle' } | { type: 'success' } | { type: 'error'; message: string };
@@ -30,13 +30,7 @@ function getEmailError(value: string, isTaken: boolean): string | null {
 
 function getPasswordError(value: string): string | null {
   if (!value) return 'Enter a password';
-  if (value.length < PASSWORD_MIN_LENGTH) {
-    return `Password must be at least ${PASSWORD_MIN_LENGTH} characters`;
-  }
-  if (value.length > PASSWORD_MAX_LENGTH) {
-    return `Password must be at most ${PASSWORD_MAX_LENGTH} characters`;
-  }
-  return null;
+  return getPasswordLengthError(value);
 }
 
 export default function RegisterPage() {

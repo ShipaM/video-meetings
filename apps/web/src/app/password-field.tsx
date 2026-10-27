@@ -2,6 +2,19 @@
 
 import { Button, Description, FieldError, InputGroup, Label, TextField } from '@heroui/react';
 import { type Ref, useState } from 'react';
+import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from './register/constants';
+
+/** Length check of a new password; counts code points, like the API's `MinLength` / `MaxLength`. */
+export function getPasswordLengthError(value: string): string | null {
+  const length = [...value].length;
+  if (length < PASSWORD_MIN_LENGTH) {
+    return `Password must be at least ${PASSWORD_MIN_LENGTH} characters`;
+  }
+  if (length > PASSWORD_MAX_LENGTH) {
+    return `Password must be at most ${PASSWORD_MAX_LENGTH} characters`;
+  }
+  return null;
+}
 
 function EyeIcon({ isOff }: { isOff: boolean }) {
   return (
@@ -30,12 +43,16 @@ type PasswordFieldProps = {
   error: string | null;
   autoComplete: 'new-password' | 'current-password';
   placeholder: string;
+  label?: string;
+  name?: string;
   hint?: string;
   isDisabled?: boolean;
   inputRef?: Ref<HTMLInputElement>;
 };
 
 export function PasswordField({
+  label = 'Password',
+  name = 'password',
   value,
   onChange,
   onBlur,
@@ -51,7 +68,7 @@ export function PasswordField({
   return (
     <TextField
       isRequired
-      name="password"
+      name={name}
       type={isVisible ? 'text' : 'password'}
       autoComplete={autoComplete}
       isDisabled={isDisabled}
@@ -61,8 +78,8 @@ export function PasswordField({
       isInvalid={error !== null}
       validationBehavior="aria"
     >
-      <Label>Password</Label>
-      <InputGroup fullWidth aria-label="Password">
+      <Label>{label}</Label>
+      <InputGroup fullWidth aria-label={label}>
         <InputGroup.Input ref={inputRef} placeholder={placeholder} />
         <InputGroup.Suffix className="pr-1">
           <Button
@@ -70,7 +87,7 @@ export function PasswordField({
             size="sm"
             variant="ghost"
             isDisabled={isDisabled}
-            aria-label={isVisible ? 'Hide password' : 'Show password'}
+            aria-label={`${isVisible ? 'Hide' : 'Show'} ${label.toLowerCase()}`}
             aria-pressed={isVisible}
             onPress={() => setIsVisible((visible) => !visible)}
           >
