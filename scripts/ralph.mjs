@@ -4,7 +4,7 @@
 // `--merge` also merges the pull request and updates the local `base` (used by `npm run ralph:all`).
 // Exit codes: 0 phase done, 1 an issue is still open after its run, 2 iteration limit reached.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { openSync, readFileSync } from 'node:fs';
+import { openSync, readFileSync, rmSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
 const config = JSON.parse(readFileSync('.claude/ralph.config.json', 'utf8'));
@@ -100,6 +100,8 @@ async function startDevServers() {
     console.log(`🛑 Stopping the running dev servers (pid ${stale.join(', ')})...`);
     stale.forEach(killTree);
   }
+  // Next.js leftovers from earlier servers can break its manifest writes (EPERM on rename).
+  rmSync('apps/web/.next/dev', { recursive: true, force: true, maxRetries: 5 });
 
   console.log(`🚀 Starting the dev servers (npm run dev, log in ${DEV_LOG})...`);
   const log = openSync(DEV_LOG, 'w');
