@@ -98,7 +98,7 @@ function ProfileContent({ token }: { token: string }) {
 
           {state.type === 'ready' && (
             <div className="flex items-center gap-4">
-              <AvatarPlaceholder className="size-16 shrink-0" iconClassName="size-8" />
+              <AvatarPlaceholder size="lg" className="size-16 shrink-0" iconClassName="size-8" />
               <div className="flex min-w-0 flex-col gap-1">
                 <h2 className="text-lg font-semibold wrap-break-word">
                   {getDisplayName(state.profile)}

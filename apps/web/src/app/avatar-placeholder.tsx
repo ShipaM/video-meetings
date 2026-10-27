@@ -1,15 +1,18 @@
 import { Avatar } from '@heroui/react';
+import type { ComponentProps } from 'react';
 
 /** The user's avatar while none can be set: a person icon in a circle. Decorative. */
 export function AvatarPlaceholder({
+  size,
   className,
   iconClassName,
 }: {
+  size?: ComponentProps<typeof Avatar>['size'];
   className: string;
   iconClassName: string;
 }) {
   return (
-    <Avatar className={className} aria-hidden="true">
+    <Avatar size={size} className={className} aria-hidden="true">
       <Avatar.Fallback>
         <svg
           viewBox="0 0 24 24"
