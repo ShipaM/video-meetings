@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { clearAccessToken, getEmailFromToken, useAccessToken } from './auth-storage';
 import { API_URL, RECENT_MEETINGS_COUNT, SERVER_UNAVAILABLE_MESSAGE } from './constants';
+import { HeaderProfile } from './header-profile';
 import { formatMeetingDate, type Meeting } from './meetings';
 import { SharedChip } from './shared-chip';
 
@@ -73,9 +74,10 @@ function HomeContent({ token }: { token: string }) {
     <main className="flex flex-1 items-center justify-center p-4 sm:p-6">
       <Card className="glass-card w-full max-w-2xl rounded-3xl p-6 sm:p-8">
         <Card.Header className="gap-1">
-          <Card.Title className="text-xl font-semibold wrap-break-word sm:text-2xl">
-            Hello{email ? `, ${email}` : ''}
-          </Card.Title>
+          <div className="mb-4 flex">
+            <HeaderProfile email={email} />
+          </div>
+          <Card.Title className="text-xl font-semibold sm:text-2xl">Your meetings</Card.Title>
           <Card.Description>
             {state.type === 'ready'
               ? `You have ${meetings.length} ${meetings.length === 1 ? 'meeting' : 'meetings'}`
