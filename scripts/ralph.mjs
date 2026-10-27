@@ -64,7 +64,8 @@ function runClaude(prompt) {
   });
 }
 
-const DEV_URLS = ['http://localhost:3000', 'http://localhost:4000'];
+const DEV_PORTS = [3000, 4000];
+const DEV_URLS = DEV_PORTS.map((port) => `http://localhost:${port}`);
 const DEV_LOG = '.claude/ralph.dev.log';
 const reachable = (url) =>
   fetch(url).then(
@@ -72,11 +73,33 @@ const reachable = (url) =>
     () => false,
   );
 
+// Ids of the processes listening on the dev ports.
+function devPortPids() {
+  if (process.platform !== 'win32') {
+    const args = DEV_PORTS.flatMap((port) => ['-i', `tcp:${port}`]);
+    const out = spawnSync('lsof', ['-t', '-sTCP:LISTEN', ...args], { encoding: 'utf8' }).stdout;
+    return [...new Set(out.split(/\s+/).filter(Boolean))];
+  }
+  const ports = new RegExp(`:(${DEV_PORTS.join('|')})\\s.*LISTENING\\s+(\\d+)`);
+  const lines = execFileSync('netstat', ['-ano'], { encoding: 'utf8' }).split('\n');
+  return [...new Set(lines.map((line) => line.match(ports)?.[2]).filter(Boolean))];
+}
+
+const killTree = (pid) =>
+  process.platform === 'win32'
+    ? spawnSync('taskkill', ['/pid', String(pid), '/t', '/f'])
+    : spawnSync('kill', [String(pid)]);
+
 // UI issues are checked in the browser against the dev servers; agents must not start them.
-// Reuses servers that are already running; otherwise starts `npm run dev` (output in DEV_LOG)
-// and stops it when this process exits.
-async function ensureDevServers() {
-  if ((await Promise.all(DEV_URLS.map(reachable))).every(Boolean)) return;
+// Servers that were already running may serve another branch's code (watch builds miss changes
+// on a branch switch), so stop them and start `npm run dev` on the current branch (output in
+// DEV_LOG); it is stopped when this process exits.
+async function startDevServers() {
+  const stale = devPortPids();
+  if (stale.length > 0) {
+    console.log(`🛑 Stopping the running dev servers (pid ${stale.join(', ')})...`);
+    stale.forEach(killTree);
+  }
 
   console.log(`🚀 Starting the dev servers (npm run dev, log in ${DEV_LOG})...`);
   const log = openSync(DEV_LOG, 'w');
@@ -86,7 +109,7 @@ async function ensureDevServers() {
     detached: process.platform !== 'win32',
   });
   process.on('exit', () => {
-    if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(dev.pid), '/t', '/f']);
+    if (process.platform === 'win32') killTree(dev.pid);
     else process.kill(-dev.pid);
   });
   process.on('SIGINT', () => process.exit(130));
@@ -115,14 +138,13 @@ console.log(`\n═══ Phase ${index + 1}: ${milestone} (${branch}) ═══`
 
 let issues = openIssues(milestone);
 if (issues.length > 0) {
-  await ensureDevServers();
-
   if (branchExists(branch)) {
     git('switch', branch);
   } else {
     gitRemote('fetch', 'origin', base);
     git('switch', '-c', branch, `origin/${base}`);
   }
+  await startDevServers();
 }
 
 for (let iteration = 1; issues.length > 0; iteration++) {
