@@ -95,4 +95,56 @@ describe('Auth (e2e)', () => {
       await login({ email: 'not-an-email', password }).expect(400);
     });
   });
+
+  describe('POST /auth/password', () => {
+    const newPassword = 'N3wStr0ngPassw0rd!';
+
+    const signUp = async (name: string): Promise<string> => {
+      const res = await register({ email: email(name), password }).expect(201);
+      return (res.body as { accessToken: string }).accessToken;
+    };
+    const changePassword = (token: string, body: object) =>
+      request(server()).post('/auth/password').set('Authorization', `Bearer ${token}`).send(body);
+
+    it('changes the password: login works only with the new one and the token stays valid', async () => {
+      const token = await signUp('change-password');
+
+      await changePassword(token, { oldPassword: password, newPassword }).expect(204);
+
+      await login({ email: email('change-password'), password: newPassword }).expect(201);
+      await login({ email: email('change-password'), password }).expect(401);
+      await request(server()).get('/users/me').set('Authorization', `Bearer ${token}`).expect(200);
+    });
+
+    it('rejects a wrong old password (403) and keeps the old password', async () => {
+      const token = await signUp('wrong-old-password');
+
+      // 403, not 401: the token is valid, and a 401 would sign the user out in the web app.
+      await changePassword(token, { oldPassword: 'wrong-password', newPassword }).expect(403);
+
+      await login({ email: email('wrong-old-password'), password }).expect(201);
+      await login({ email: email('wrong-old-password'), password: newPassword }).expect(401);
+    });
+
+    it('rejects a new password under 8 characters (400) and keeps the old password', async () => {
+      const token = await signUp('short-new-password');
+
+      await changePassword(token, { oldPassword: password, newPassword: 'Short1!' }).expect(400);
+
+      await login({ email: email('short-new-password'), password }).expect(201);
+    });
+
+    it('rejects a missing old password (400)', async () => {
+      const token = await signUp('no-old-password');
+
+      await changePassword(token, { newPassword }).expect(400);
+    });
+
+    it('rejects a request without a token (401)', async () => {
+      await request(server())
+        .post('/auth/password')
+        .send({ oldPassword: password, newPassword })
+        .expect(401);
+    });
+  });
 });

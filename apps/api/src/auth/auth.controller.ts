@@ -1,8 +1,10 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, HttpCode, HttpStatus, Post, Req, UseGuards } from '@nestjs/common';
 import { CommandBus, QueryBus } from '@nestjs/cqrs';
 import type { AccessTokenResult } from './auth.types.js';
-import { RegisterUserCommand } from './commands/index.js';
-import { LoginDto, RegisterDto } from './dto/auth-credentials.dto.js';
+import { ChangePasswordCommand, RegisterUserCommand } from './commands/index.js';
+import { ChangePasswordDto, LoginDto, RegisterDto } from './dto/auth-credentials.dto.js';
+import { JwtAuthGuard } from './jwt-auth.guard.js';
+import type { AuthenticatedRequest } from './jwt-auth.guard.js';
 import { LoginQuery } from './queries/index.js';
 
 @Controller('auth')
@@ -30,4 +32,16 @@ export class AuthController {
   // login(@Body() dto: LoginDto) {
   //   return this.auth.login(dto);
   // }
+
+  @Post('password')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  changePassword(
+    @Req() { user }: AuthenticatedRequest,
+    @Body() dto: ChangePasswordDto,
+  ): Promise<void> {
+    return this.commandBus.execute(
+      new ChangePasswordCommand(user.id, dto.oldPassword, dto.newPassword),
+    );
+  }
 }

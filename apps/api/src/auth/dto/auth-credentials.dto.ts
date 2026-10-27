@@ -18,3 +18,14 @@ export class RegisterDto {
   @MaxLength(72) // bcrypt only uses the first 72 bytes
   password: string;
 }
+
+export class ChangePasswordDto {
+  @IsString()
+  @IsNotEmpty()
+  oldPassword: string;
+
+  @IsString()
+  @MinLength(8)
+  @MaxLength(72) // same rules as RegisterDto.password
+  newPassword: string;
+}

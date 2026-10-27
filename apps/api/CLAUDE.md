@@ -33,7 +33,7 @@ Standard Nest module/controller/service layout:
 - `src/prisma/` - global `PrismaModule` / `PrismaService` (Prisma 7 with the `@prisma/adapter-pg` driver adapter; disconnects in `onApplicationShutdown`, the last shutdown phase, after pg-boss has stopped in `beforeApplicationShutdown`, so running jobs can still write their results)
 - `src/config/env.ts` - `numberEnv(name, fallback, min)`: numeric settings, a bad value fails at startup
 - `src/jobs/` - global `JobsModule` / `JobsService`: the app's single pg-boss instance (background jobs and schedules, see Background processing)
-- `src/auth/` - `AuthModule`: `POST /auth/register` and `POST /auth/login`, token issuing and `JwtAuthGuard` (see below)
+- `src/auth/` - `AuthModule`: `POST /auth/register`, `POST /auth/login` and `POST /auth/password`, token issuing and `JwtAuthGuard` (see below)
 - `src/users/` - `UsersModule`: creating and looking up users, the caller's profile `GET` / `PATCH /users/me` (see below)
 - `src/meetings/` - `MeetingsModule`: meetings and their participants, `/meetings[/:id[/participants]]` (see below)
 - `src/meeting-files/` - `MeetingFilesModule`: resumable upload (tus), file list and details, signed downloads and streaming, background processing of documents and recordings (see below)
@@ -46,12 +46,12 @@ Standard Nest module/controller/service layout:
 
 `AppModule` imports `CqrsModule.forRoot()` (global `CommandBus` / `QueryBus`), `PrismaModule` and `JobsModule` (both global) and the four feature modules:
 
-| Module               | Responsibility                                                          | Public surface                                                                                                                             | Talks to                                                                                              |
-| -------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
-| `AuthModule`         | registration, login, password hashing, JWT issuing and verification     | `POST /auth/register`, `POST /auth/login`, `JwtAuthGuard`, `JwtModule`                                                                     | Users, through `CreateUserCommand` / `FindUserByEmailQuery`                                           |
-| `UsersModule`        | the `User` table: creating and looking users up, the caller's profile   | `GET` / `PATCH /users/me`; CQRS messages from `src/users/index.ts`                                                                         | Prisma; imports `AuthModule` for `JwtAuthGuard` only                                                  |
-| `MeetingsModule`     | meetings, their participants and the access rules (owner / participant) | `/meetings`, `/meetings/:id`, `/meetings/:id/participants[/:userId]`; `GetMeetingQuery` (`src/meetings/index.ts`)                          | imports `AuthModule` for `JwtAuthGuard`; Users through `FindUserByEmailQuery` / `FindUsersByIdsQuery` |
-| `MeetingFilesModule` | the `MeetingFile` table and the files on disk (`FILES_DIR`)             | `/uploads` (tus), `GET` / `DELETE /meetings/:id/files[/:fileId]`, `POST .../files/:fileId/retry` and `/link`, `GET /files/:fileId/content` | Meetings, through `GetMeetingQuery` (access rules); `AuthModule` for the guard and `JwtService`       |
+| Module               | Responsibility                                                                       | Public surface                                                                                                                             | Talks to                                                                                                        |
+| -------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `AuthModule`         | registration, login, password change, password hashing, JWT issuing and verification | `POST /auth/register`, `POST /auth/login`, `POST /auth/password`, `JwtAuthGuard`, `JwtModule`                                              | Users, through `CreateUserCommand` / `FindUserByEmailQuery` / `FindUserByIdQuery` / `UpdatePasswordHashCommand` |
+| `UsersModule`        | the `User` table: creating and looking users up, the caller's profile                | `GET` / `PATCH /users/me`; CQRS messages from `src/users/index.ts`                                                                         | Prisma; imports `AuthModule` for `JwtAuthGuard` only                                                            |
+| `MeetingsModule`     | meetings, their participants and the access rules (owner / participant)              | `/meetings`, `/meetings/:id`, `/meetings/:id/participants[/:userId]`; `GetMeetingQuery` (`src/meetings/index.ts`)                          | imports `AuthModule` for `JwtAuthGuard`; Users through `FindUserByEmailQuery` / `FindUsersByIdsQuery`           |
+| `MeetingFilesModule` | the `MeetingFile` table and the files on disk (`FILES_DIR`)                          | `/uploads` (tus), `GET` / `DELETE /meetings/:id/files[/:fileId]`, `POST .../files/:fileId/retry` and `/link`, `GET /files/:fileId/content` | Meetings, through `GetMeetingQuery` (access rules); `AuthModule` for the guard and `JwtService`                 |
 
 Dependencies point one way: MeetingFiles -> (buses) -> Meetings -> (buses) -> Users, and Meetings -> Auth -> (buses) -> Users. Users imports `AuthModule` only for the guard (Auth never imports Users, it uses the buses) and knows nothing about Meetings, Meetings nothing about files.
 
@@ -71,12 +71,15 @@ Auth additionally has `token.service.ts` (signs the JWT), `jwt-auth.guard.ts` an
 
 ## Auth
 
-Both routes take `{ email, password }` and return `201 { accessToken }` (JWT, payload `sub` + `email`). Passwords are hashed with bcrypt; e-mails are stored lower-cased.
+Register and login take `{ email, password }` and return `201 { accessToken }` (JWT, payload `sub` + `email`). Passwords are hashed with bcrypt; e-mails are stored lower-cased.
 
-| Route                 | Errors                                                                                               |
-| --------------------- | ---------------------------------------------------------------------------------------------------- |
-| `POST /auth/register` | `400` invalid e-mail / missing or too short (<8) password, `409` e-mail taken                        |
-| `POST /auth/login`    | `400` invalid e-mail / missing password, `401` unknown e-mail or wrong password (no user is created) |
+`POST /auth/password` (bearer token, `JwtAuthGuard`) takes `{ oldPassword, newPassword }` (`ChangePasswordDto`, same length rules as registration) and returns `204`; the current token keeps working.
+
+| Route                 | Errors                                                                                                                                                                                   |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /auth/register` | `400` invalid e-mail / missing or too short (<8) password, `409` e-mail taken                                                                                                            |
+| `POST /auth/login`    | `400` invalid e-mail / missing password, `401` unknown e-mail or wrong password (no user is created)                                                                                     |
+| `POST /auth/password` | `400` missing old password / too short (<8) new password, `401` no or invalid token, `403` wrong old password (not `401`, which would sign the web app out); nothing is changed on error |
 
 Auth registers `TokenService` (`issue(userId, email)` signs `{ sub, email }`) and `JwtAuthGuard`; it exports `JwtModule` and the guard, which is how Meetings protects its routes.
 
@@ -93,18 +96,19 @@ A global `ValidationPipe` (`whitelist: true`) is registered in `src/main.ts` and
 
 Other modules reach Users only through CQRS messages, which are exported from `src/users/index.ts` (the module's public API):
 
-| Message                               | Result                                                                                                     |
-| ------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `CreateUserCommand(email, hash)`      | the stored `UserRecord`; lower-cases the e-mail, `409 ConflictException` when it is taken                  |
-| `FindUserByEmailQuery(email)`         | `UserRecord` or `null`; the lookup is case-insensitive (the e-mail is lower-cased)                         |
-| `FindUserByIdQuery(id)`               | `UserRecord` or `null`                                                                                     |
-| `FindUsersByIdsQuery(ids)`            | `UserContact[]` (`id`, `email`, no hash; unknown ids left out); one query, participant e-mails             |
-| `GetProfileQuery(userId)`             | `UserProfile` (`email`, `name`, `avatar`); `404` for an unknown user                                       |
-| `UpdateProfileCommand(userId, name?)` | the updated `UserProfile`; trims the name, empty or `null` clears it, omitted keeps it; `404` unknown user |
+| Message                                   | Result                                                                                                     |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `CreateUserCommand(email, hash)`          | the stored `UserRecord`; lower-cases the e-mail, `409 ConflictException` when it is taken                  |
+| `FindUserByEmailQuery(email)`             | `UserRecord` or `null`; the lookup is case-insensitive (the e-mail is lower-cased)                         |
+| `FindUserByIdQuery(id)`                   | `UserRecord` or `null`                                                                                     |
+| `FindUsersByIdsQuery(ids)`                | `UserContact[]` (`id`, `email`, no hash; unknown ids left out); one query, participant e-mails             |
+| `GetProfileQuery(userId)`                 | `UserProfile` (`email`, `name`, `avatar`); `404` for an unknown user                                       |
+| `UpdateProfileCommand(userId, name?)`     | the updated `UserProfile`; trims the name, empty or `null` clears it, omitted keeps it; `404` unknown user |
+| `UpdatePasswordHashCommand(userId, hash)` | nothing; stores the new bcrypt hash (Auth hashes the password); `404` unknown user                         |
 
 `UserRecord` (`id`, `email`, `passwordHash`) is internal: never return it from a controller. Queries that serve other users' data return `UserContact` (`id`, `email`) instead, so the hash is never even loaded. Profile and other user features go into this module.
 
-Auth does the credential work and talks to Users over the buses: `RegisterUserHandler` hashes the password with bcrypt and dispatches `CreateUserCommand`; `LoginHandler` dispatches `FindUserByEmailQuery`, compares the hash and issues the JWT through `TokenService`. Auth never imports Prisma.
+Auth does the credential work and talks to Users over the buses: `RegisterUserHandler` hashes the password with bcrypt and dispatches `CreateUserCommand`; `LoginHandler` dispatches `FindUserByEmailQuery`, compares the hash and issues the JWT through `TokenService`; `ChangePasswordHandler` dispatches `FindUserByIdQuery`, compares the old password (`403` on mismatch, `404` unknown user), hashes the new one and dispatches `UpdatePasswordHashCommand`. Auth never imports Prisma.
 
 ## Meetings
 
