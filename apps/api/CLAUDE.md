@@ -93,14 +93,15 @@ A global `ValidationPipe` (`whitelist: true`) is registered in `src/main.ts` and
 
 Other modules reach Users only through CQRS messages, which are exported from `src/users/index.ts` (the module's public API):
 
-| Message                               | Result                                                                                                     |
-| ------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `CreateUserCommand(email, hash)`      | the stored `UserRecord`; lower-cases the e-mail, `409 ConflictException` when it is taken                  |
-| `FindUserByEmailQuery(email)`         | `UserRecord` or `null`; the lookup is case-insensitive (the e-mail is lower-cased)                         |
-| `FindUserByIdQuery(id)`               | `UserRecord` or `null`                                                                                     |
-| `FindUsersByIdsQuery(ids)`            | `UserContact[]` (`id`, `email`, no hash; unknown ids left out); one query, participant e-mails             |
-| `GetProfileQuery(userId)`             | `UserProfile` (`email`, `name`, `avatar`); `404` for an unknown user                                       |
-| `UpdateProfileCommand(userId, name?)` | the updated `UserProfile`; trims the name, empty or `null` clears it, omitted keeps it; `404` unknown user |
+| Message                                   | Result                                                                                                     |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `CreateUserCommand(email, hash)`          | the stored `UserRecord`; lower-cases the e-mail, `409 ConflictException` when it is taken                  |
+| `FindUserByEmailQuery(email)`             | `UserRecord` or `null`; the lookup is case-insensitive (the e-mail is lower-cased)                         |
+| `FindUserByIdQuery(id)`                   | `UserRecord` or `null`                                                                                     |
+| `FindUsersByIdsQuery(ids)`                | `UserContact[]` (`id`, `email`, no hash; unknown ids left out); one query, participant e-mails             |
+| `GetProfileQuery(userId)`                 | `UserProfile` (`email`, `name`, `avatar`); `404` for an unknown user                                       |
+| `UpdateProfileCommand(userId, name?)`     | the updated `UserProfile`; trims the name, empty or `null` clears it, omitted keeps it; `404` unknown user |
+| `UpdatePasswordHashCommand(userId, hash)` | nothing; stores the new bcrypt hash (Auth hashes the password); `404` unknown user                         |
 
 `UserRecord` (`id`, `email`, `passwordHash`) is internal: never return it from a controller. Queries that serve other users' data return `UserContact` (`id`, `email`) instead, so the hash is never even loaded. Profile and other user features go into this module.
 
