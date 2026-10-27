@@ -1,5 +1,9 @@
 // Public API of the Users module: other modules talk to it through these messages only.
 export {
+  AuthorizeAvatarUploadRequestCommand,
+  CancelAvatarUploadCommand,
+  CompleteAvatarUploadCommand,
+  CreateAvatarUploadCommand,
   CreateUserCommand,
   UpdatePasswordHashCommand,
   UpdateProfileCommand,
