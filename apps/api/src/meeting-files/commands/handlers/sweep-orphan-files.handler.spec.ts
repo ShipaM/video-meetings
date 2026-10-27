@@ -1,5 +1,5 @@
 import type { PrismaService } from '../../../prisma/prisma.service.js';
-import type { FilesStorageService } from '../../files-storage.service.js';
+import type { FilesStorageService } from '../../../storage/files-storage.service.js';
 import { ORPHAN_GRACE_MS } from '../../meeting-files.config.js';
 import { SweepOrphanFilesCommand } from '../sweep-orphan-files.command.js';
 import { SweepOrphanFilesHandler } from './sweep-orphan-files.handler.js';

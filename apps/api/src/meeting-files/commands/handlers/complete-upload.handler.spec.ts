@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { PrismaService } from '../../../prisma/prisma.service.js';
-import type { FilesStorageService } from '../../files-storage.service.js';
+import type { FilesStorageService } from '../../../storage/files-storage.service.js';
 import type { ProcessingQueue } from '../../processing/processing-queue.js';
 import { CompleteUploadCommand } from '../complete-upload.command.js';
 import { CompleteUploadHandler } from './complete-upload.handler.js';

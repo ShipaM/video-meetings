@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { readdir, rm, stat, statfs } from 'node:fs/promises';
 import path from 'node:path';
 import { FileStore } from '@tus/file-store';
-import { resolveFilesDir } from './meeting-files.config.js';
+import { resolveFilesDir } from './storage.config.js';
 
 /** A file id: names on disk derive from it, anything else in the directories is not ours. */
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
@@ -49,7 +49,7 @@ export interface WorkDirEntry {
 }
 
 /**
- * Local disk storage of meeting files. tus writes uploads in place into `FILES_DIR/uploads/<key>`
+ * Local disk storage of uploaded files (meeting files, avatars). tus writes uploads in place into `FILES_DIR/uploads/<key>`
  * (plus a `<key>.json` metadata sidecar); the completed data file stays there as the original.
  * Processing jobs keep temporary files (a recording's extracted audio) in
  * `FILES_DIR/derived/<fileId>.<attempt>`, removed when the job ends.

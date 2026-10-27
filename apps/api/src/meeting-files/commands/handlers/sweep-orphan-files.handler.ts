@@ -1,7 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { PrismaService } from '../../../prisma/prisma.service.js';
-import { FilesStorageService } from '../../files-storage.service.js';
+import { FilesStorageService } from '../../../storage/files-storage.service.js';
 import { SweepOrphanFilesCommand } from '../sweep-orphan-files.command.js';
 
 /** Storage keys looked up per query. */

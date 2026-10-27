@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { PrismaService } from '../../../prisma/prisma.service.js';
-import type { FilesStorageService } from '../../files-storage.service.js';
+import type { FilesStorageService } from '../../../storage/files-storage.service.js';
 import { SummaryError } from '../../processing/summarizer.js';
 import { ProcessDocumentCommand } from '../process-document.command.js';
 import { ProcessDocumentHandler } from './process-document.handler.js';

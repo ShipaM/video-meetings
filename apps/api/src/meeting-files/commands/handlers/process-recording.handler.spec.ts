@@ -2,7 +2,7 @@ import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { PrismaService } from '../../../prisma/prisma.service.js';
-import type { FilesStorageService } from '../../files-storage.service.js';
+import type { FilesStorageService } from '../../../storage/files-storage.service.js';
 import { RecordingError, extractAudio, probeMedia } from '../../processing/media.js';
 import { SummaryError } from '../../processing/summarizer.js';
 import { TranscriptionError } from '../../processing/transcriber.js';

@@ -1,7 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { CommandBus, CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { PrismaService } from '../../../prisma/prisma.service.js';
-import { FilesStorageService } from '../../files-storage.service.js';
+import { FilesStorageService } from '../../../storage/files-storage.service.js';
 import { CleanupAbandonedUploadsCommand } from '../cleanup-abandoned-uploads.command.js';
 import { CompleteUploadCommand } from '../complete-upload.command.js';
 

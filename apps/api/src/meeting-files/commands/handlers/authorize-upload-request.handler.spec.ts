@@ -2,7 +2,7 @@ import { ConflictException, ForbiddenException, NotFoundException } from '@nestj
 import type { CommandBus, QueryBus } from '@nestjs/cqrs';
 import { GetMeetingQuery } from '../../../meetings/index.js';
 import type { PrismaService } from '../../../prisma/prisma.service.js';
-import type { FilesStorageService } from '../../files-storage.service.js';
+import type { FilesStorageService } from '../../../storage/files-storage.service.js';
 import { AuthorizeUploadRequestCommand } from '../authorize-upload-request.command.js';
 import { CompleteUploadCommand } from '../complete-upload.command.js';
 import { AuthorizeUploadRequestHandler } from './authorize-upload-request.handler.js';

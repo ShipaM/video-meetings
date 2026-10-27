@@ -2,7 +2,7 @@ import { NotFoundException } from '@nestjs/common';
 import { CommandHandler, ICommandHandler, QueryBus } from '@nestjs/cqrs';
 import { GetMeetingQuery } from '../../../meetings/index.js';
 import { PrismaService } from '../../../prisma/prisma.service.js';
-import { FilesStorageService } from '../../files-storage.service.js';
+import { FilesStorageService } from '../../../storage/files-storage.service.js';
 import { DeleteMeetingFileCommand } from '../delete-meeting-file.command.js';
 
 @CommandHandler(DeleteMeetingFileCommand)
