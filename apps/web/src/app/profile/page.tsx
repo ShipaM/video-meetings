@@ -8,7 +8,7 @@ import { clearAccessToken, useAccessToken } from '../auth-storage';
 import { AvatarPlaceholder } from '../avatar-placeholder';
 import { API_URL, SERVER_UNAVAILABLE_MESSAGE } from '../constants';
 import { getDisplayName, type Profile } from '../profile';
-import { PROFILE_LOAD_FAILED_MESSAGE } from './constants';
+import { CHANGE_PASSWORD_SECTION_ID, PROFILE_LOAD_FAILED_MESSAGE } from './constants';
 
 type ProfileState =
   { type: 'loading' } | { type: 'error'; message: string } | { type: 'ready'; profile: Profile };
@@ -133,6 +133,13 @@ function ProfileContent({ token }: { token: string }) {
               Edit
             </Link>
           </div>
+
+          <Link
+            href={`/profile/edit#${CHANGE_PASSWORD_SECTION_ID}`}
+            className={buttonVariants({ variant: 'ghost', size: 'lg', className: 'w-full' })}
+          >
+            Change password
+          </Link>
         </Card.Content>
       </Card>
     </main>
