@@ -105,6 +105,8 @@ export function ChangePasswordForm() {
     event.preventDefault();
     // Enter in a field submits even while the button is pending.
     if (isPending) return;
+    // A previous result never stays next to the errors of this attempt.
+    setStatus({ type: 'idle' });
     setTouched({ oldPassword: true, newPassword: true, confirmPassword: true });
 
     if (getOldPasswordError(oldPassword)) {
@@ -121,7 +123,6 @@ export function ChangePasswordForm() {
     }
 
     setIsPending(true);
-    setStatus({ type: 'idle' });
     setOldServerError(null);
     setNewServerError(null);
 
