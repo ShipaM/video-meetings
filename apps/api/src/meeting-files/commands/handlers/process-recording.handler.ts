@@ -4,7 +4,7 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import type { MeetingFile } from '../../../generated/prisma/client.js';
 import { PrismaService } from '../../../prisma/prisma.service.js';
-import { FilesStorageService } from '../../files-storage.service.js';
+import { FilesStorageService } from '../../../storage/files-storage.service.js';
 import { RecordingError, extractAudio, probeMedia } from '../../processing/media.js';
 import {
   FAILURE_REASONS,

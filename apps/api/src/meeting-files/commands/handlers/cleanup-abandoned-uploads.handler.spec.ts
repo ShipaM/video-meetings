@@ -1,6 +1,6 @@
 import type { CommandBus } from '@nestjs/cqrs';
 import type { PrismaService } from '../../../prisma/prisma.service.js';
-import type { FilesStorageService } from '../../files-storage.service.js';
+import type { FilesStorageService } from '../../../storage/files-storage.service.js';
 import { ABANDONED_UPLOAD_MS } from '../../meeting-files.config.js';
 import { CleanupAbandonedUploadsCommand } from '../cleanup-abandoned-uploads.command.js';
 import { CompleteUploadCommand } from '../complete-upload.command.js';

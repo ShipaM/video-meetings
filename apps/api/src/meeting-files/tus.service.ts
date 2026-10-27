@@ -10,7 +10,7 @@ import {
   CompleteUploadCommand,
   CreateUploadCommand,
 } from './commands/index.js';
-import { FilesStorageService } from './files-storage.service.js';
+import { FilesStorageService } from '../storage/files-storage.service.js';
 import { MAX_FILE_SIZE } from './meeting-files.config.js';
 
 type TusRequest = Parameters<NonNullable<ServerOptions['onIncomingRequest']>>[0];

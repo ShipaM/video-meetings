@@ -3,7 +3,7 @@ import { IQueryHandler, QueryBus, QueryHandler } from '@nestjs/cqrs';
 import { JwtService } from '@nestjs/jwt';
 import { GetMeetingQuery } from '../../../meetings/index.js';
 import { PrismaService } from '../../../prisma/prisma.service.js';
-import { FilesStorageService } from '../../files-storage.service.js';
+import { FilesStorageService } from '../../../storage/files-storage.service.js';
 import { FILE_LINK_AUDIENCE, fileLinkSecret } from '../../meeting-files.config.js';
 import type { FileContent, FileLinkPayload } from '../../meeting-files.types.js';
 import { GetFileContentQuery } from '../get-file-content.query.js';

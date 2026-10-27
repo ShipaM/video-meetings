@@ -2,7 +2,7 @@ import { NotFoundException } from '@nestjs/common';
 import type { QueryBus } from '@nestjs/cqrs';
 import { GetMeetingQuery } from '../../../meetings/index.js';
 import type { PrismaService } from '../../../prisma/prisma.service.js';
-import type { FilesStorageService } from '../../files-storage.service.js';
+import type { FilesStorageService } from '../../../storage/files-storage.service.js';
 import { DeleteMeetingFileCommand } from '../delete-meeting-file.command.js';
 import { DeleteMeetingFileHandler } from './delete-meeting-file.handler.js';
 

@@ -3,7 +3,7 @@ import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import type { MeetingFile } from '../../../generated/prisma/client.js';
 import { PrismaService } from '../../../prisma/prisma.service.js';
 import { contentMatchesType } from '../../file-types.js';
-import { FilesStorageService } from '../../files-storage.service.js';
+import { FilesStorageService } from '../../../storage/files-storage.service.js';
 import { PROCESSED_KINDS, ProcessingQueue } from '../../processing/processing-queue.js';
 import { CompleteUploadCommand } from '../complete-upload.command.js';
 

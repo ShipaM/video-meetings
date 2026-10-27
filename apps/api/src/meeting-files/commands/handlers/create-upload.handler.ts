@@ -4,7 +4,7 @@ import type { MeetingFile } from '../../../generated/prisma/client.js';
 import { GetMeetingQuery } from '../../../meetings/index.js';
 import { PrismaService } from '../../../prisma/prisma.service.js';
 import { resolveFileType } from '../../file-types.js';
-import { FilesStorageService } from '../../files-storage.service.js';
+import { FilesStorageService } from '../../../storage/files-storage.service.js';
 import { ABANDONED_UPLOAD_MS } from '../../meeting-files.config.js';
 import { CreateUploadCommand } from '../create-upload.command.js';
 

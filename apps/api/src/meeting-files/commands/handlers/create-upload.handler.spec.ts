@@ -2,7 +2,7 @@ import { BadRequestException, HttpException, NotFoundException } from '@nestjs/c
 import type { QueryBus } from '@nestjs/cqrs';
 import { GetMeetingQuery } from '../../../meetings/index.js';
 import type { PrismaService } from '../../../prisma/prisma.service.js';
-import type { FilesStorageService } from '../../files-storage.service.js';
+import type { FilesStorageService } from '../../../storage/files-storage.service.js';
 import { CreateUploadCommand } from '../create-upload.command.js';
 import { CreateUploadHandler } from './create-upload.handler.js';
 
