@@ -7,6 +7,8 @@ runner starts a new run for the next one.
 
 - Read the issue title, body and its "Done when" criteria (`gh issue view <number>`).
 - Work only on the issue you were given; do not touch other issues of the milestone.
+- Uncommitted changes in the working tree are the unfinished work of a previous run on the same issue (it
+  ran out of turns): review them and continue from there instead of starting over.
 
 ### 2. Branch
 
@@ -18,6 +20,8 @@ runner starts a new run for the next one.
 ### 3. Implementation (TDD)
 
 - Write the tests first, then the implementation.
+- The dev servers (web on :3000, api on :4000) are already running; never start or stop them. If they do not
+  respond, comment on the issue and leave it open.
 - Run the affected tests after every change (`npm run test`, plus `npm run test:e2e --workspace=api` for API
   routes; e2e needs `npm run db:up`).
 - If the tests are still red after five attempts, stop: write an issue comment

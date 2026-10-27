@@ -1,7 +1,7 @@
 {
   "base": "master",
   "maxIterations": 5,
-  "maxTurns": 50,
+  "maxTurns": 150,
   "prompt": "Read .claude/ralph.md and follow its instructions. Implement issue #{issue} from milestone '{milestone}' in branch '{branch}'.",
   "phases": [
     {

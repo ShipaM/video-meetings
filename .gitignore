@@ -86,6 +86,7 @@ Desktop.ini
 .claude/settings.local.json
 .claude/worktrees
 .claude/ralph.state.json
+.claude/ralph.dev.log
 CLAUDE.local.md
 
 # Uploaded / recorded media produced at runtime

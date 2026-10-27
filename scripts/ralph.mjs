@@ -3,8 +3,8 @@
 // Usage: `npm run ralph -- <phase>` (1-based; default: the first phase with open issues).
 // `--merge` also merges the pull request and updates the local `base` (used by `npm run ralph:all`).
 // Exit codes: 0 phase done, 1 an issue is still open after its run, 2 iteration limit reached.
-import { execFileSync, spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { openSync, readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
 const config = JSON.parse(readFileSync('.claude/ralph.config.json', 'utf8'));
@@ -51,6 +51,41 @@ function runClaude(prompt) {
   });
 }
 
+const DEV_URLS = ['http://localhost:3000', 'http://localhost:4000'];
+const DEV_LOG = '.claude/ralph.dev.log';
+const reachable = (url) =>
+  fetch(url).then(
+    () => true,
+    () => false,
+  );
+
+// UI issues are checked in the browser against the dev servers; agents must not start them.
+// Reuses servers that are already running; otherwise starts `npm run dev` (output in DEV_LOG)
+// and stops it when this process exits.
+async function ensureDevServers() {
+  if ((await Promise.all(DEV_URLS.map(reachable))).every(Boolean)) return;
+
+  console.log(`🚀 Starting the dev servers (npm run dev, log in ${DEV_LOG})...`);
+  const log = openSync(DEV_LOG, 'w');
+  const dev = spawn('npm run dev', {
+    shell: true,
+    stdio: ['ignore', log, log],
+    detached: process.platform !== 'win32',
+  });
+  process.on('exit', () => {
+    if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(dev.pid), '/t', '/f']);
+    else process.kill(-dev.pid);
+  });
+  process.on('SIGINT', () => process.exit(130));
+
+  for (let waited = 0; waited < 180; waited += 3) {
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    if ((await Promise.all(DEV_URLS.map(reachable))).every(Boolean)) return;
+  }
+  console.log(`⛔ The dev servers did not start within 3 minutes. See ${DEV_LOG}.`);
+  process.exit(1);
+}
+
 const args = process.argv.slice(2);
 const merge = args.includes('--merge');
 const phaseArg = args.find((a) => !a.startsWith('--'));
@@ -67,6 +102,8 @@ console.log(`\n═══ Phase ${index + 1}: ${milestone} (${branch}) ═══`
 
 let issues = openIssues(milestone);
 if (issues.length > 0) {
+  await ensureDevServers();
+
   if (branchExists(branch)) {
     git('switch', branch);
   } else {
