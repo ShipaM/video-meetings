@@ -7,6 +7,8 @@ runner starts a new run for the next one.
 
 - Read the issue title, body and its "Done when" criteria (`gh issue view <number>`).
 - Work only on the issue you were given; do not touch other issues of the milestone.
+- Uncommitted changes in the working tree are the unfinished work of a previous run on the same issue (it
+  ran out of turns): review them and continue from there instead of starting over.
 
 ### 2. Branch
 
