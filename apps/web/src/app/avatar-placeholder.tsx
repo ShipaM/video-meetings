@@ -12,7 +12,8 @@ export function AvatarPlaceholder({
   iconClassName: string;
 }) {
   return (
-    <Avatar size={size} className={className} aria-hidden="true">
+    // HeroUI rounds avatars by a fixed radius, which squares off large ones; keep it a circle.
+    <Avatar size={size} className={`rounded-full ${className}`} aria-hidden="true">
       <Avatar.Fallback>
         <svg
           viewBox="0 0 24 24"
