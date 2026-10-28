@@ -19,9 +19,11 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { authorizedFetch, readErrorMessage } from '../../api';
 import { useAccessToken } from '../../auth-storage';
-import { SERVER_UNAVAILABLE_MESSAGE } from '../../constants';
+import { API_URL, SERVER_UNAVAILABLE_MESSAGE } from '../../constants';
 import type { Profile } from '../../profile';
 import {
+  AVATAR_UPLOAD_GONE_MESSAGE,
+  AVATAR_UPLOADING_MESSAGE,
   PROFILE_LOAD_FAILED_MESSAGE,
   PROFILE_NAME_HINT,
   PROFILE_NAME_MAX_LENGTH,
@@ -29,7 +31,9 @@ import {
   PROFILE_NAME_TOO_LONG_MESSAGE,
   PROFILE_SAVE_FAILED_MESSAGE,
 } from '../constants';
+import { AvatarPicker } from './avatar-picker';
 import { ChangePasswordForm, isChangePasswordTarget } from './change-password-form';
+import { useAvatarUpload } from './use-avatar-upload';
 
 type LoadState = { type: 'loading' } | { type: 'error'; message: string } | { type: 'ready' };
 
@@ -58,6 +62,9 @@ function ProfileEditContent() {
   const [loadState, setLoadState] = useState<LoadState>({ type: 'loading' });
   const [attempt, setAttempt] = useState(0);
   const [name, setName] = useState('');
+  const [savedAvatarUrl, setSavedAvatarUrl] = useState<string | null>(null);
+  const avatar = useAvatarUpload();
+  const { reset: resetAvatar } = avatar;
   const [touched, setTouched] = useState(false);
   const [nameServerError, setNameServerError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -84,6 +91,9 @@ function ProfileEditContent() {
         const profile = (await response.json()) as Profile;
         // A return visit starts from the saved name, not the edits and errors left from the last one.
         setName(profile.name ?? '');
+        // The API answers a URL relative to itself.
+        setSavedAvatarUrl(profile.avatar === null ? null : `${API_URL}${profile.avatar}`);
+        resetAvatar();
         setTouched(false);
         setNameServerError(null);
         setError(null);
@@ -96,7 +106,7 @@ function ProfileEditContent() {
 
     void load();
     return () => controller.abort();
-  }, [attempt]);
+  }, [attempt, resetAvatar]);
 
   useEffect(() => {
     // Opened through Change password: the password form has the focus.
@@ -125,6 +135,11 @@ function ProfileEditContent() {
       nameRef.current?.focus();
       return;
     }
+    const { change } = avatar;
+    if (avatar.isUploading) {
+      avatar.setError(AVATAR_UPLOADING_MESSAGE);
+      return;
+    }
 
     setIsPending(true);
     setError(null);
@@ -137,13 +152,22 @@ function ProfileEditContent() {
       const response = await authorizedFetch('/users/me', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim() }),
+        body: JSON.stringify({
+          name: name.trim(),
+          ...(change.type === 'upload' && { avatarUploadId: change.uploadId }),
+          ...(change.type === 'remove' && { avatar: null }),
+        }),
         signal: controller.signal,
       });
       if (!response) return;
       if (response.status === 400) {
         setNameServerError((await readErrorMessage(response)) ?? PROFILE_NAME_REJECTED_MESSAGE);
         nameRef.current?.focus();
+        return;
+      }
+      // The upload is gone (e.g. removed by the cleanup) or unfinished: the saved avatar stays.
+      if (change.type === 'upload' && (response.status === 404 || response.status === 409)) {
+        resetAvatar(AVATAR_UPLOAD_GONE_MESSAGE);
         return;
       }
       if (!response.ok) {
@@ -165,7 +189,7 @@ function ProfileEditContent() {
       <Card className="glass-card w-full max-w-md rounded-3xl p-6 sm:p-8">
         <Card.Header className="gap-1">
           <Card.Title className="text-2xl font-semibold">Edit profile</Card.Title>
-          <Card.Description>Choose the name others see</Card.Description>
+          <Card.Description>Choose the name and avatar others see</Card.Description>
         </Card.Header>
         <Card.Content className="flex flex-col gap-5">
           {loadState.type === 'loading' && (
@@ -189,6 +213,15 @@ function ProfileEditContent() {
 
           {loadState.type === 'ready' && (
             <Form className="flex flex-col gap-5" validationBehavior="aria" onSubmit={handleSubmit}>
+              <AvatarPicker
+                savedAvatarUrl={savedAvatarUrl}
+                change={avatar.change}
+                isUploading={avatar.isUploading}
+                error={avatar.error}
+                onPick={avatar.pick}
+                onRemove={avatar.remove}
+              />
+
               <TextField
                 name="name"
                 value={name}
