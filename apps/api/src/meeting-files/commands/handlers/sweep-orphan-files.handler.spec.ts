@@ -1,5 +1,7 @@
+import type { QueryBus } from '@nestjs/cqrs';
 import type { PrismaService } from '../../../prisma/prisma.service.js';
 import type { FilesStorageService } from '../../../storage/files-storage.service.js';
+import { FindAvatarStorageKeysQuery } from '../../../users/index.js';
 import { ORPHAN_GRACE_MS } from '../../meeting-files.config.js';
 import { SweepOrphanFilesCommand } from '../sweep-orphan-files.command.js';
 import { SweepOrphanFilesHandler } from './sweep-orphan-files.handler.js';
@@ -10,9 +12,11 @@ describe('SweepOrphanFilesHandler', () => {
   const removeQuietly = vi.fn();
   const workDirs = vi.fn();
   const removeWorkDir = vi.fn();
+  const queryBus = { execute: vi.fn() };
   const handler = new SweepOrphanFilesHandler(
     { meetingFile: { findMany } } as unknown as PrismaService,
     { storedEntries, removeQuietly, workDirs, removeWorkDir } as unknown as FilesStorageService,
+    queryBus as unknown as QueryBus,
   );
 
   const olderThan = new Date('2026-01-01T12:00:00.000Z');
@@ -28,6 +32,8 @@ describe('SweepOrphanFilesHandler', () => {
     workDirs.mockResolvedValue([]);
     removeWorkDir.mockReset();
     removeWorkDir.mockResolvedValue(undefined);
+    queryBus.execute.mockReset();
+    queryBus.execute.mockResolvedValue([]);
   });
 
   it('defaults to files older than the grace period', () => {
@@ -56,6 +62,24 @@ describe('SweepOrphanFilesHandler', () => {
     expect(removeQuietly).toHaveBeenCalledWith('orphan', 'orphan file orphan');
   });
 
+  it('keeps old avatar files, asking Users only about keys without a meeting file', async () => {
+    storedEntries.mockResolvedValue([
+      { storageKey: 'orphan', modifiedAt: old },
+      { storageKey: 'known', modifiedAt: old },
+      { storageKey: 'avatar', modifiedAt: old },
+    ]);
+    findMany.mockResolvedValue([{ storageKey: 'known' }]);
+    queryBus.execute.mockResolvedValue(['avatar']);
+
+    await expect(handler.execute(new SweepOrphanFilesCommand(olderThan))).resolves.toBe(1);
+
+    expect(queryBus.execute).toHaveBeenCalledWith(
+      new FindAvatarStorageKeysQuery(['orphan', 'avatar']),
+    );
+    expect(removeQuietly).toHaveBeenCalledTimes(1);
+    expect(removeQuietly).toHaveBeenCalledWith('orphan', 'orphan file orphan');
+  });
+
   it('does not count a removal that failed', async () => {
     storedEntries.mockResolvedValue([{ storageKey: 'orphan', modifiedAt: old }]);
     findMany.mockResolvedValue([]);
@@ -70,6 +94,7 @@ describe('SweepOrphanFilesHandler', () => {
     await expect(handler.execute(new SweepOrphanFilesCommand(olderThan))).resolves.toBe(0);
 
     expect(findMany).not.toHaveBeenCalled();
+    expect(queryBus.execute).not.toHaveBeenCalled();
   });
 
   it('removes old work directories, except the one of the attempt still PROCESSING', async () => {

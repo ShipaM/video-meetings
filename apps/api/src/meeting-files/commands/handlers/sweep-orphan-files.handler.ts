@@ -1,7 +1,8 @@
 import { Logger } from '@nestjs/common';
-import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
+import { CommandHandler, ICommandHandler, QueryBus } from '@nestjs/cqrs';
 import { PrismaService } from '../../../prisma/prisma.service.js';
 import { FilesStorageService } from '../../../storage/files-storage.service.js';
+import { FindAvatarStorageKeysQuery } from '../../../users/index.js';
 import { SweepOrphanFilesCommand } from '../sweep-orphan-files.command.js';
 
 /** Storage keys looked up per query. */
@@ -14,6 +15,7 @@ export class SweepOrphanFilesHandler implements ICommandHandler<SweepOrphanFiles
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: FilesStorageService,
+    private readonly queryBus: QueryBus,
   ) {}
 
   async execute({ olderThan }: SweepOrphanFilesCommand): Promise<number> {
@@ -31,9 +33,15 @@ export class SweepOrphanFilesHandler implements ICommandHandler<SweepOrphanFiles
         select: { storageKey: true },
       });
       const known = new Set(rows.map(({ storageKey }) => storageKey));
+      // Avatars share the directory; only Users knows their keys.
+      const unknown = keys.filter((key) => !known.has(key));
+      const avatarKeys =
+        unknown.length > 0
+          ? new Set(await this.queryBus.execute(new FindAvatarStorageKeysQuery(unknown)))
+          : new Set<string>();
       const results = await Promise.all(
-        keys
-          .filter((key) => !known.has(key))
+        unknown
+          .filter((key) => !avatarKeys.has(key))
           .map((key) => this.storage.removeQuietly(key, `orphan file ${key}`)),
       );
       removed += results.filter(Boolean).length;

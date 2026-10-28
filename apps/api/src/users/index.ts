@@ -10,6 +10,7 @@ export {
   UpdateProfileCommand,
 } from './commands/index.js';
 export {
+  FindAvatarStorageKeysQuery,
   FindUserByEmailQuery,
   FindUserByIdQuery,
   FindUsersByIdsQuery,
