@@ -217,3 +217,5 @@ if (merge) {
     git('reset', '-q', `origin/${base}`);
   }
 }
+// The dev servers keep the event loop alive: exit explicitly so the exit hook stops them.
+process.exit(0);
