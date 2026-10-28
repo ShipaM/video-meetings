@@ -37,15 +37,6 @@ export const PLAYABLE_MIME_TYPES = [
 /** JWT audience of file links, so an access token can never be used as a link and vice versa. */
 export const FILE_LINK_AUDIENCE = 'file-content';
 
-/** Secret for file links (`FILE_LINK_SECRET`), separate from `JWT_SECRET`. */
-export function fileLinkSecret(): string {
-  const secret = process.env.FILE_LINK_SECRET;
-  if (!secret) {
-    throw new Error('FILE_LINK_SECRET is not set');
-  }
-  return secret;
-}
-
 /** An upload with no chunk for this long counts as abandoned (PRD: 24 hours after the last part). */
 export const ABANDONED_UPLOAD_MS = 24 * 60 * 60 * 1000;
 

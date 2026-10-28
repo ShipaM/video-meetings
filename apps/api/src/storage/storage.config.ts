@@ -11,3 +11,15 @@ export function resolveFilesDir(): string {
   mkdirSync(dir, { recursive: true });
   return dir;
 }
+
+/**
+ * Secret for signed links to stored files (`FILE_LINK_SECRET`), separate from `JWT_SECRET`. Each
+ * kind of link has its own JWT audience, so links of one kind never open another.
+ */
+export function fileLinkSecret(): string {
+  const secret = process.env.FILE_LINK_SECRET;
+  if (!secret) {
+    throw new Error('FILE_LINK_SECRET is not set');
+  }
+  return secret;
+}
