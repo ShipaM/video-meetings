@@ -1,8 +1,8 @@
 import { Module, OnModuleInit } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module.js';
 import { CommandHandlers } from './commands/index.js';
+import { fileLinkSecret } from '../storage/storage.config.js';
 import { StorageModule } from '../storage/storage.module.js';
-import { fileLinkSecret } from './meeting-files.config.js';
 import { MeetingFilesController } from './meeting-files.controller.js';
 import { ProcessingQueue } from './processing/processing-queue.js';
 import { SummarizerProvider } from './processing/summarizer.provider.js';

@@ -25,6 +25,8 @@ export class UsersController {
     @Req() { user }: AuthenticatedRequest,
     @Body() dto: UpdateProfileDto,
   ): Promise<UserProfile> {
-    return this.commandBus.execute(new UpdateProfileCommand(user.id, dto.name));
+    return this.commandBus.execute(
+      new UpdateProfileCommand(user.id, dto.name, dto.avatar === null ? null : dto.avatarUploadId),
+    );
   }
 }

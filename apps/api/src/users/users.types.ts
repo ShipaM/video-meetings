@@ -8,9 +8,24 @@ export interface UserRecord {
 /** The public part of a user (no password hash), for showing users to other users. */
 export type UserContact = Pick<UserRecord, 'id' | 'email'>;
 
-/** The signed-in user's own profile, safe for HTTP responses. `avatar` stays `null` until avatars exist. */
+/**
+ * The signed-in user's own profile, safe for HTTP responses. `avatar` is the signed content URL of
+ * the current avatar (relative to the API), `null` when none is set.
+ */
 export interface UserProfile {
   email: string;
   name: string | null;
-  avatar: null;
+  avatar: string | null;
+}
+
+/** Payload of an avatar link token. */
+export interface AvatarLinkPayload {
+  sub: string;
+  avatarId: string;
+}
+
+/** What the avatar content route needs to stream the image. */
+export interface AvatarContent {
+  path: string;
+  mimeType: string;
 }

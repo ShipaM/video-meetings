@@ -4,7 +4,8 @@ import { JwtService } from '@nestjs/jwt';
 import { GetMeetingQuery } from '../../../meetings/index.js';
 import { PrismaService } from '../../../prisma/prisma.service.js';
 import { FilesStorageService } from '../../../storage/files-storage.service.js';
-import { FILE_LINK_AUDIENCE, fileLinkSecret } from '../../meeting-files.config.js';
+import { fileLinkSecret } from '../../../storage/storage.config.js';
+import { FILE_LINK_AUDIENCE } from '../../meeting-files.config.js';
 import type { FileContent, FileLinkPayload } from '../../meeting-files.types.js';
 import { GetFileContentQuery } from '../get-file-content.query.js';
 
