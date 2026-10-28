@@ -2,18 +2,23 @@ import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { CommandBus } from '@nestjs/cqrs';
 import { jobsPollingIntervalSeconds } from '../jobs/jobs.config.js';
 import { JobsService } from '../jobs/jobs.service.js';
+import { CleanupAvatarUploadsCommand } from '../users/index.js';
 import {
   CleanupAbandonedUploadsCommand,
   FailStuckProcessingCommand,
   SweepOrphanFilesCommand,
 } from './commands/index.js';
-import { STORAGE_MAINTENANCE_CRON, filesCleanupEnabled } from './meeting-files.config.js';
+import {
+  ABANDONED_UPLOAD_MS,
+  STORAGE_MAINTENANCE_CRON,
+  filesCleanupEnabled,
+} from './meeting-files.config.js';
 
 export const STORAGE_MAINTENANCE_QUEUE = 'storage-maintenance';
 
 /**
- * Hourly maintenance as a pg-boss schedule (plus one run at startup): removes abandoned uploads
- * and orphan files, then fails files stuck in `PROCESSING`. The `singleton` queue policy keeps
+ * Hourly maintenance as a pg-boss schedule (plus one run at startup): removes abandoned uploads,
+ * abandoned or unattached avatar uploads (Users) and orphan files, then fails files stuck in `PROCESSING`. The `singleton` queue policy keeps
  * runs from overlapping, also across API instances. `FILES_CLEANUP=off` (e2e tests) disables it.
  */
 @Injectable()
@@ -43,12 +48,15 @@ export class StorageMaintenanceWorker implements OnApplicationBootstrap {
   private async run(): Promise<void> {
     try {
       const abandoned = await this.commandBus.execute(new CleanupAbandonedUploadsCommand());
+      const avatars = await this.commandBus.execute(
+        new CleanupAvatarUploadsCommand(new Date(Date.now() - ABANDONED_UPLOAD_MS)),
+      );
       const orphans = await this.commandBus.execute(new SweepOrphanFilesCommand());
       const stuck = await this.commandBus.execute(new FailStuckProcessingCommand());
-      if (abandoned + orphans + stuck > 0) {
+      if (abandoned + avatars + orphans + stuck > 0) {
         this.logger.log(
-          `Removed ${abandoned} abandoned upload(s) and ${orphans} orphan file(s), ` +
-            `failed ${stuck} stuck file(s)`,
+          `Removed ${abandoned} abandoned upload(s), ${avatars} abandoned or unattached ` +
+            `avatar upload(s) and ${orphans} orphan file(s), failed ${stuck} stuck file(s)`,
         );
       }
     } catch (error) {

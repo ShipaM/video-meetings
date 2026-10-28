@@ -1,5 +1,6 @@
 import { AuthorizeAvatarUploadRequestHandler } from './handlers/authorize-avatar-upload-request.handler.js';
 import { CancelAvatarUploadHandler } from './handlers/cancel-avatar-upload.handler.js';
+import { CleanupAvatarUploadsHandler } from './handlers/cleanup-avatar-uploads.handler.js';
 import { CompleteAvatarUploadHandler } from './handlers/complete-avatar-upload.handler.js';
 import { CreateAvatarUploadHandler } from './handlers/create-avatar-upload.handler.js';
 import { CreateUserHandler } from './handlers/create-user.handler.js';
@@ -23,4 +24,5 @@ export const CommandHandlers = [
   CompleteAvatarUploadHandler,
   CancelAvatarUploadHandler,
   AuthorizeAvatarUploadRequestHandler,
+  CleanupAvatarUploadsHandler,
 ];
