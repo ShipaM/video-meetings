@@ -18,8 +18,9 @@ export const STORAGE_MAINTENANCE_QUEUE = 'storage-maintenance';
 
 /**
  * Hourly maintenance as a pg-boss schedule (plus one run at startup): removes abandoned uploads,
- * abandoned or unattached avatar uploads (Users) and orphan files, then fails files stuck in `PROCESSING`. The `singleton` queue policy keeps
- * runs from overlapping, also across API instances. `FILES_CLEANUP=off` (e2e tests) disables it.
+ * abandoned or unattached avatar uploads (Users) and orphan files, then fails files stuck in
+ * `PROCESSING`. The `singleton` queue policy keeps runs from overlapping, also across API
+ * instances. `FILES_CLEANUP=off` (e2e tests) disables it.
  */
 @Injectable()
 export class StorageMaintenanceWorker implements OnApplicationBootstrap {
