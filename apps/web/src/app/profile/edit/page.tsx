@@ -193,6 +193,15 @@ function ProfileEditContent() {
         <Card.Content className="flex flex-col gap-5">
           {loadState.type === 'loading' && (
             <div className="flex flex-col gap-2" aria-busy="true">
+              {/* The avatar picker's place, so the form does not jump down once it loads. */}
+              <Skeleton className="mb-2 h-5 w-14 rounded-lg" />
+              <div className="mb-3 flex items-center gap-4">
+                <Skeleton className="size-20 shrink-0 rounded-full" />
+                <div className="flex flex-1 flex-col gap-2">
+                  <Skeleton className="h-11 w-32 rounded-full sm:h-10" />
+                  <Skeleton className="h-4 w-3/4 rounded-lg" />
+                </div>
+              </div>
               <Skeleton className="h-5 w-16 rounded-lg" />
               <Skeleton className="h-10 w-full rounded-xl" />
             </div>

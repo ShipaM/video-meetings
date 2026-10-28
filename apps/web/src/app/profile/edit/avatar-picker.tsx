@@ -28,6 +28,7 @@ export function AvatarPicker({
   onRemove: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const chooseRef = useRef<HTMLButtonElement>(null);
   // An image that did not load (e.g. its signed URL expired) shows the placeholder instead.
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const previewUrl =
@@ -38,6 +39,12 @@ export function AvatarPicker({
     // Reset, so picking the same file again still reports a change.
     event.target.value = '';
     if (file) onPick(file);
+  }
+
+  function handleRemove() {
+    onRemove();
+    // Remove disappears with the image; keep the focus in the picker instead of losing it to the page.
+    chooseRef.current?.focus();
   }
 
   return (
@@ -57,11 +64,16 @@ export function AvatarPicker({
         )}
         <div className="flex min-w-0 flex-col gap-2">
           <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" onPress={() => inputRef.current?.click()}>
+            <Button
+              ref={chooseRef}
+              variant="secondary"
+              className="min-h-11 sm:min-h-10"
+              onPress={() => inputRef.current?.click()}
+            >
               {previewUrl === null ? 'Choose image' : 'Change image'}
             </Button>
             {previewUrl !== null && (
-              <Button variant="danger-soft" onPress={onRemove}>
+              <Button variant="danger-soft" className="min-h-11 sm:min-h-10" onPress={handleRemove}>
                 Remove
               </Button>
             )}
