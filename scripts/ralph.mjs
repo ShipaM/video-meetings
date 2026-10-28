@@ -37,6 +37,23 @@ const isOpen = (number) =>
 
 const branchExists = (branch) => git('branch', '--list', branch) !== '';
 
+// Whether the working tree (untracked files included) holds exactly the files of `ref`:
+// stages it into a throwaway index and compares the trees.
+function treeMatches(ref) {
+  const index = git('rev-parse', '--git-path', 'ralph-check.index');
+  const env = { ...process.env, GIT_INDEX_FILE: index };
+  // stderr is piped: `add` warns about every file whose line endings it converts.
+  const run = (...args) =>
+    execFileSync('git', args, { encoding: 'utf8', env, stdio: 'pipe' }).trim();
+  try {
+    run('read-tree', ref);
+    run('add', '-A');
+    return run('write-tree') === git('rev-parse', `${ref}^{tree}`);
+  } finally {
+    rmSync(index, { force: true });
+  }
+}
+
 // Streams the agent's progress: text replies and the tools it calls.
 // Only the project MCP servers (.mcp.json) are loaded: user plugins slow the start down.
 function runClaude(prompt) {
@@ -191,5 +208,12 @@ if (merge) {
   console.log(`🔀 Merging the PR into ${base}...`);
   gh('pr', 'merge', branch, '--merge');
   git('switch', base);
-  gitRemote('pull', '--ff-only', 'origin', base);
+  try {
+    gitRemote('pull', '--ff-only', 'origin', base);
+  } catch (error) {
+    // A pull interrupted by a lock can update the files but not the branch, and every retry
+    // then fails on "local changes": finish it when the files already match the remote.
+    if (!treeMatches(`origin/${base}`)) throw error;
+    git('reset', '-q', `origin/${base}`);
+  }
 }
