@@ -2,6 +2,7 @@
 export {
   AuthorizeAvatarUploadRequestCommand,
   CancelAvatarUploadCommand,
+  CleanupAvatarUploadsCommand,
   CompleteAvatarUploadCommand,
   CreateAvatarUploadCommand,
   CreateUserCommand,

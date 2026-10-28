@@ -8,6 +8,7 @@ import { UpdateProfileHandler } from './handlers/update-profile.handler.js';
 
 export { AuthorizeAvatarUploadRequestCommand } from './authorize-avatar-upload-request.command.js';
 export { CancelAvatarUploadCommand } from './cancel-avatar-upload.command.js';
+export { CleanupAvatarUploadsCommand } from './cleanup-avatar-uploads.command.js';
 export { CompleteAvatarUploadCommand } from './complete-avatar-upload.command.js';
 export { CreateAvatarUploadCommand } from './create-avatar-upload.command.js';
 export { CreateUserCommand } from './create-user.command.js';
