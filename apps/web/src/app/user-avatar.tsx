@@ -1,12 +1,18 @@
 import { Avatar } from '@heroui/react';
 import type { ComponentProps } from 'react';
 
-/** The user's avatar while none can be set: a person icon in a circle. Decorative. */
-export function AvatarPlaceholder({
+/**
+ * The user's avatar cut to a circle, or a person icon while there is none, while it loads or when
+ * it fails to load (e.g. its signed URL expired). Decorative: the name is always shown next to it.
+ */
+export function UserAvatar({
+  src = null,
   size,
   className,
   iconClassName,
 }: {
+  /** Absolute URL of the avatar image, or `null` for the placeholder. */
+  src?: string | null;
   size?: ComponentProps<typeof Avatar>['size'];
   className: string;
   iconClassName: string;
@@ -14,6 +20,7 @@ export function AvatarPlaceholder({
   return (
     // HeroUI rounds avatars by a fixed radius, which squares off large ones; keep it a circle.
     <Avatar size={size} className={`rounded-full ${className}`} aria-hidden="true">
+      {src !== null && <Avatar.Image src={src} alt="" className="object-cover" />}
       <Avatar.Fallback>
         <svg
           viewBox="0 0 24 24"

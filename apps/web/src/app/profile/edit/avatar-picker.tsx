@@ -2,7 +2,7 @@
 
 import { Button, ProgressBar } from '@heroui/react';
 import { useRef, useState } from 'react';
-import { AvatarPlaceholder } from '../../avatar-placeholder';
+import { UserAvatar } from '../../user-avatar';
 import { AVATAR_ACCEPT_ATTRIBUTE, AVATAR_HINT } from '../constants';
 import type { AvatarChange } from './use-avatar-upload';
 
@@ -45,7 +45,7 @@ export function AvatarPicker({
       <legend className="mb-2 text-sm font-medium">Avatar</legend>
       <div className="flex items-center gap-4">
         {previewUrl === null || previewUrl === failedUrl ? (
-          <AvatarPlaceholder className="size-20 shrink-0" iconClassName="size-10" />
+          <UserAvatar className="size-20 shrink-0" iconClassName="size-10" />
         ) : (
           // eslint-disable-next-line @next/next/no-img-element
           <img

@@ -5,9 +5,9 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { clearAccessToken, useAccessToken } from '../auth-storage';
-import { AvatarPlaceholder } from '../avatar-placeholder';
 import { API_URL, SERVER_UNAVAILABLE_MESSAGE } from '../constants';
-import { getDisplayName, type Profile } from '../profile';
+import { getAvatarUrl, getDisplayName, type Profile } from '../profile';
+import { UserAvatar } from '../user-avatar';
 import { CHANGE_PASSWORD_SECTION_ID, PROFILE_LOAD_FAILED_MESSAGE } from './constants';
 
 type ProfileState =
@@ -98,7 +98,12 @@ function ProfileContent({ token }: { token: string }) {
 
           {state.type === 'ready' && (
             <div className="flex items-center gap-4">
-              <AvatarPlaceholder size="lg" className="size-16 shrink-0" iconClassName="size-8" />
+              <UserAvatar
+                src={getAvatarUrl(state.profile)}
+                size="lg"
+                className="size-16 shrink-0"
+                iconClassName="size-8"
+              />
               <div className="flex min-w-0 flex-col gap-1">
                 <h2 className="text-lg font-semibold wrap-break-word">
                   {getDisplayName(state.profile)}

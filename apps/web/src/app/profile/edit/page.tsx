@@ -19,8 +19,8 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { authorizedFetch, readErrorMessage } from '../../api';
 import { useAccessToken } from '../../auth-storage';
-import { API_URL, SERVER_UNAVAILABLE_MESSAGE } from '../../constants';
-import type { Profile } from '../../profile';
+import { SERVER_UNAVAILABLE_MESSAGE } from '../../constants';
+import { getAvatarUrl, type Profile } from '../../profile';
 import {
   AVATAR_UPLOAD_GONE_MESSAGE,
   AVATAR_UPLOADING_MESSAGE,
@@ -91,8 +91,7 @@ function ProfileEditContent() {
         const profile = (await response.json()) as Profile;
         // A return visit starts from the saved name, not the edits and errors left from the last one.
         setName(profile.name ?? '');
-        // The API answers a URL relative to itself.
-        setSavedAvatarUrl(profile.avatar === null ? null : `${API_URL}${profile.avatar}`);
+        setSavedAvatarUrl(getAvatarUrl(profile));
         resetAvatar();
         setTouched(false);
         setNameServerError(null);
