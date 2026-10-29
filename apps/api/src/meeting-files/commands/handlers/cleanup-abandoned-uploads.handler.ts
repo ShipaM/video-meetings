@@ -39,8 +39,8 @@ export class CleanupAbandonedUploadsHandler implements ICommandHandler<CleanupAb
         take: BATCH_SIZE,
         select: { id: true, storageKey: true, size: true },
       });
-      const results = await Promise.all(batch.map((file) => this.cleanUp(file, cutoff)));
-      removed += results.filter(Boolean).length;
+      const removedFlags = await Promise.all(batch.map((file) => this.cleanUp(file, cutoff)));
+      removed += removedFlags.filter(Boolean).length;
       if (batch.length < BATCH_SIZE) {
         return removed;
       }

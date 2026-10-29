@@ -39,12 +39,12 @@ export class SweepOrphanFilesHandler implements ICommandHandler<SweepOrphanFiles
         unknown.length > 0
           ? new Set(await this.queryBus.execute(new FindAvatarStorageKeysQuery(unknown)))
           : new Set<string>();
-      const results = await Promise.all(
+      const removedFlags = await Promise.all(
         unknown
           .filter((key) => !avatarKeys.has(key))
           .map((key) => this.storage.removeQuietly(key, `orphan file ${key}`)),
       );
-      removed += results.filter(Boolean).length;
+      removed += removedFlags.filter(Boolean).length;
     }
     return removed + (await this.sweepWorkDirs(olderThan));
   }
