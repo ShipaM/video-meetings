@@ -1,41 +1,11 @@
 'use client';
 
 import { Alert, Button, Card, Form, Spinner } from '@heroui/react';
-import { useEffect, useRef, useState } from 'react';
-import { authorizedFetch, readErrorMessage } from '../../api';
-import { SERVER_UNAVAILABLE_MESSAGE } from '../../constants';
-import { getPasswordLengthError, PasswordField } from '../../password-field';
+import { useEffect } from 'react';
+import { PasswordField } from '../../password-field';
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from '../../register/constants';
-import {
-  CHANGE_PASSWORD_SECTION_ID,
-  CONFIRM_PASSWORD_MISMATCH_MESSAGE,
-  CONFIRM_PASSWORD_MISSING_MESSAGE,
-  NEW_PASSWORD_MISSING_MESSAGE,
-  NEW_PASSWORD_REJECTED_MESSAGE,
-  OLD_PASSWORD_MISSING_MESSAGE,
-  OLD_PASSWORD_WRONG_MESSAGE,
-  PASSWORD_CHANGED_MESSAGE,
-  PASSWORD_CHANGE_FAILED_MESSAGE,
-} from '../constants';
-
-type Status = { type: 'idle' } | { type: 'success' } | { type: 'error'; message: string };
-
-const UNTOUCHED = { oldPassword: false, newPassword: false, confirmPassword: false };
-
-function getOldPasswordError(value: string): string | null {
-  return value ? null : OLD_PASSWORD_MISSING_MESSAGE;
-}
-
-/** Same limits as registration, mirrors `ChangePasswordDto` in the API. */
-function getNewPasswordError(value: string): string | null {
-  if (!value) return NEW_PASSWORD_MISSING_MESSAGE;
-  return getPasswordLengthError(value);
-}
-
-function getConfirmPasswordError(value: string, newPassword: string): string | null {
-  if (!value) return CONFIRM_PASSWORD_MISSING_MESSAGE;
-  return value === newPassword ? null : CONFIRM_PASSWORD_MISMATCH_MESSAGE;
-}
+import { CHANGE_PASSWORD_SECTION_ID, PASSWORD_CHANGED_MESSAGE } from '../constants';
+import { useChangePasswordForm } from './use-change-password-form';
 
 /** Whether the page was opened through the Change password action on `/profile`. */
 export function isChangePasswordTarget(): boolean {
@@ -43,120 +13,28 @@ export function isChangePasswordTarget(): boolean {
 }
 
 export function ChangePasswordForm() {
-  const [oldPassword, setOldPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [touched, setTouched] = useState(UNTOUCHED);
-  const [oldServerError, setOldServerError] = useState<string | null>(null);
-  const [newServerError, setNewServerError] = useState<string | null>(null);
-  const [status, setStatus] = useState<Status>({ type: 'idle' });
-  const [isPending, setIsPending] = useState(false);
-  const oldRef = useRef<HTMLInputElement>(null);
-  const newRef = useRef<HTMLInputElement>(null);
-  const confirmRef = useRef<HTMLInputElement>(null);
-
-  function resetFields() {
-    setOldPassword('');
-    setNewPassword('');
-    setConfirmPassword('');
-    setTouched(UNTOUCHED);
-  }
+  const {
+    oldPassword,
+    newPassword,
+    confirmPassword,
+    oldError,
+    newError,
+    confirmError,
+    status,
+    isPending,
+    oldRef,
+    newRef,
+    confirmRef,
+    handleOldChange,
+    handleNewChange,
+    handleConfirmChange,
+    handleBlur,
+    handleSubmit,
+  } = useChangePasswordForm();
 
   useEffect(() => {
     if (isChangePasswordTarget()) oldRef.current?.focus();
-    // Next.js keeps this page's state when it is left: drop the typed passwords, so a return visit
-    // starts with an empty form. A request in flight is not aborted: the server may already have
-    // changed the password, and its answer still shows on return.
-    return () => {
-      resetFields();
-      setOldServerError(null);
-      setNewServerError(null);
-      setStatus({ type: 'idle' });
-    };
-  }, []);
-
-  // Errors appear after the field is left (or on submit), not while the user is still typing.
-  const oldError =
-    oldServerError ?? (touched.oldPassword ? getOldPasswordError(oldPassword) : null);
-  const newError =
-    newServerError ?? (touched.newPassword ? getNewPasswordError(newPassword) : null);
-  const confirmError = touched.confirmPassword
-    ? getConfirmPasswordError(confirmPassword, newPassword)
-    : null;
-
-  function handleOldChange(value: string) {
-    setOldPassword(value);
-    setOldServerError(null);
-    setStatus({ type: 'idle' });
-  }
-
-  function handleNewChange(value: string) {
-    setNewPassword(value);
-    setNewServerError(null);
-    setStatus({ type: 'idle' });
-  }
-
-  function handleConfirmChange(value: string) {
-    setConfirmPassword(value);
-    setStatus({ type: 'idle' });
-  }
-
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    // Enter in a field submits even while the button is pending.
-    if (isPending) return;
-    // A previous result never stays next to the errors of this attempt.
-    setStatus({ type: 'idle' });
-    setTouched({ oldPassword: true, newPassword: true, confirmPassword: true });
-
-    if (getOldPasswordError(oldPassword)) {
-      oldRef.current?.focus();
-      return;
-    }
-    if (getNewPasswordError(newPassword)) {
-      newRef.current?.focus();
-      return;
-    }
-    if (getConfirmPasswordError(confirmPassword, newPassword)) {
-      confirmRef.current?.focus();
-      return;
-    }
-
-    setIsPending(true);
-    setOldServerError(null);
-    setNewServerError(null);
-
-    try {
-      // `null` means the session ended (401), which redirects to /login.
-      const response = await authorizedFetch('/auth/password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ oldPassword, newPassword }),
-      });
-      if (!response) return;
-      if (response.status === 403) {
-        setOldServerError(OLD_PASSWORD_WRONG_MESSAGE);
-        oldRef.current?.focus();
-        return;
-      }
-      if (response.status === 400) {
-        setNewServerError((await readErrorMessage(response)) ?? NEW_PASSWORD_REJECTED_MESSAGE);
-        newRef.current?.focus();
-        return;
-      }
-      if (!response.ok) {
-        setStatus({ type: 'error', message: PASSWORD_CHANGE_FAILED_MESSAGE });
-        return;
-      }
-      // The token stays valid, so the user stays signed in; only the form starts over.
-      resetFields();
-      setStatus({ type: 'success' });
-    } catch {
-      setStatus({ type: 'error', message: SERVER_UNAVAILABLE_MESSAGE });
-    } finally {
-      setIsPending(false);
-    }
-  }
+  }, [oldRef]);
 
   return (
     <Card
@@ -174,7 +52,7 @@ export function ChangePasswordForm() {
             name="oldPassword"
             value={oldPassword}
             onChange={handleOldChange}
-            onBlur={() => setTouched((prev) => ({ ...prev, oldPassword: true }))}
+            onBlur={() => handleBlur('oldPassword')}
             error={oldError}
             autoComplete="current-password"
             placeholder="Your current password"
@@ -186,7 +64,7 @@ export function ChangePasswordForm() {
             name="newPassword"
             value={newPassword}
             onChange={handleNewChange}
-            onBlur={() => setTouched((prev) => ({ ...prev, newPassword: true }))}
+            onBlur={() => handleBlur('newPassword')}
             error={newError}
             autoComplete="new-password"
             placeholder="Create a new password"
@@ -199,7 +77,7 @@ export function ChangePasswordForm() {
             name="confirmPassword"
             value={confirmPassword}
             onChange={handleConfirmChange}
-            onBlur={() => setTouched((prev) => ({ ...prev, confirmPassword: true }))}
+            onBlur={() => handleBlur('confirmPassword')}
             error={confirmError}
             autoComplete="new-password"
             placeholder="Repeat the new password"
