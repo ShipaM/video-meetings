@@ -4,8 +4,9 @@ import { Alert, Button, Card, Skeleton, buttonVariants } from '@heroui/react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { clearAccessToken, useAccessToken } from '../auth-storage';
-import { API_URL, SERVER_UNAVAILABLE_MESSAGE } from '../constants';
+import { authorizedFetch } from '../api';
+import { useAccessToken } from '../auth-storage';
+import { SERVER_UNAVAILABLE_MESSAGE } from '../constants';
 import { getAvatarUrl, getDisplayName, type Profile } from '../profile';
 import { UserAvatar } from '../user-avatar';
 import { CHANGE_PASSWORD_SECTION_ID, PROFILE_LOAD_FAILED_MESSAGE } from './constants';
@@ -26,26 +27,21 @@ export default function ProfilePage() {
 
   // Next.js keeps a route's state when it is left. The key gives another user a fresh tree, so the
   // previous user's profile never shows, not even until the new one has loaded.
-  return <ProfileContent key={token} token={token} />;
+  return <ProfileContent key={token} />;
 }
 
-function ProfileContent({ token }: { token: string }) {
+function ProfileContent() {
   const [state, setState] = useState<ProfileState>({ type: 'loading' });
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
 
-    async function load(accessToken: string) {
+    async function load() {
       try {
-        const response = await fetch(`${API_URL}/users/me`, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-          signal: controller.signal,
-        });
-        if (response.status === 401) {
-          clearAccessToken(); // expired or invalid token: back to the login page
-          return;
-        }
+        // `null` means the token was cleared, which redirects to /login.
+        const response = await authorizedFetch('/users/me', { signal: controller.signal });
+        if (!response) return;
         if (!response.ok) {
           setState({ type: 'error', message: PROFILE_LOAD_FAILED_MESSAGE });
           return;
@@ -57,9 +53,9 @@ function ProfileContent({ token }: { token: string }) {
       }
     }
 
-    void load(token);
+    void load();
     return () => controller.abort();
-  }, [token, attempt]);
+  }, [attempt]);
 
   function handleRetry() {
     setState({ type: 'loading' });
