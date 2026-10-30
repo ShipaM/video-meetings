@@ -15,8 +15,9 @@ import {
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { clearAccessToken, useAccessToken } from '../../auth-storage';
-import { API_URL, MEETING_TITLE_MAX_LENGTH, SERVER_UNAVAILABLE_MESSAGE } from '../../constants';
+import { authorizedFetch } from '../../api';
+import { useAccessToken } from '../../auth-storage';
+import { MEETING_TITLE_MAX_LENGTH, SERVER_UNAVAILABLE_MESSAGE } from '../../constants';
 
 function getTitleError(value: string): string | null {
   return value.trim() ? null : 'Enter a meeting title';
@@ -63,17 +64,15 @@ export default function NewMeetingPage() {
     setError(null);
 
     try {
-      const response = await fetch(`${API_URL}/meetings`, {
+      const response = await authorizedFetch('/meetings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json' },
         // datetime-local has no zone; convert from the user's local time to an ISO instant.
         body: JSON.stringify({ title: title.trim(), startsAt: new Date(startsAt).toISOString() }),
       });
 
-      if (response.status === 401) {
-        clearAccessToken();
-        return;
-      }
+      // `null` means the token was cleared, which redirects to /login.
+      if (!response) return;
       if (!response.ok) {
         setError('Could not create the meeting. Please check the details.');
         return;

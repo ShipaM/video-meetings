@@ -8,7 +8,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnAppli
     super({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) });
   }
 
-  async onModuleInit() {
+  async onModuleInit(): Promise<void> {
     await this.$connect();
   }
 
@@ -16,7 +16,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnAppli
    * The last shutdown phase: background jobs (stopped in `beforeApplicationShutdown`) may still
    * write their results until then.
    */
-  async onApplicationShutdown() {
+  async onApplicationShutdown(): Promise<void> {
     await this.$disconnect();
   }
 }
