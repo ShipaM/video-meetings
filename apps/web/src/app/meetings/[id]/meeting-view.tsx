@@ -4,8 +4,9 @@ import { Alert, Card, Skeleton, buttonVariants } from '@heroui/react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { clearAccessToken, useAccessToken } from '../../auth-storage';
-import { API_URL, SERVER_UNAVAILABLE_MESSAGE } from '../../constants';
+import { authorizedFetch } from '../../api';
+import { useAccessToken } from '../../auth-storage';
+import { SERVER_UNAVAILABLE_MESSAGE } from '../../constants';
 import { formatMeetingDate, type Meeting, type MeetingFile } from '../../meetings';
 import { SharedChip } from '../../shared-chip';
 import { PROCESSING_POLL_INTERVAL_MS } from './constants';
@@ -21,20 +22,13 @@ type PageState =
 
 type LoadResult = Exclude<PageState, { type: 'loading' }> | { type: 'unauthorized' };
 
-async function fetchMeeting(
-  token: string,
-  meetingId: string,
-  signal?: AbortSignal,
-): Promise<LoadResult> {
-  const headers = { Authorization: `Bearer ${token}` };
+async function fetchMeeting(meetingId: string, signal?: AbortSignal): Promise<LoadResult> {
   try {
     const [meetingResponse, filesResponse] = await Promise.all([
-      fetch(`${API_URL}/meetings/${meetingId}`, { headers, signal }),
-      fetch(`${API_URL}/meetings/${meetingId}/files`, { headers, signal }),
+      authorizedFetch(`/meetings/${meetingId}`, { signal }),
+      authorizedFetch(`/meetings/${meetingId}/files`, { signal }),
     ]);
-    if (meetingResponse.status === 401 || filesResponse.status === 401) {
-      return { type: 'unauthorized' };
-    }
+    if (!meetingResponse || !filesResponse) return { type: 'unauthorized' };
     // 400 is a malformed (non-UUID) id: for the user it is the same as a missing meeting.
     if ([400, 404].includes(meetingResponse.status)) return { type: 'not-found' };
     if (!meetingResponse.ok || !filesResponse.ok) {
@@ -58,12 +52,10 @@ type FilesResult =
   | { type: 'error' };
 
 /** Only the file list changes after an upload, so a refresh skips the meeting itself. */
-async function fetchFiles(token: string, meetingId: string): Promise<FilesResult> {
+async function fetchFiles(meetingId: string): Promise<FilesResult> {
   try {
-    const response = await fetch(`${API_URL}/meetings/${meetingId}/files`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (response.status === 401) return { type: 'unauthorized' };
+    const response = await authorizedFetch(`/meetings/${meetingId}/files`);
+    if (!response) return { type: 'unauthorized' };
     // The meeting was deleted or access ended (e.g. the participant was removed) meanwhile.
     if (response.status === 404) return { type: 'not-found' };
     if (!response.ok) return { type: 'error' };
@@ -130,27 +122,25 @@ export function MeetingView({ meetingId }: { meetingId: string }) {
 
   // Next.js keeps a route's state when it is left. The key gives another user (or meeting) a fresh
   // tree, so nothing of the previous one shows: not the data, uploads or participants.
-  return <MeetingContent key={`${token}:${meetingId}`} token={token} meetingId={meetingId} />;
+  return <MeetingContent key={`${token}:${meetingId}`} meetingId={meetingId} />;
 }
 
-function MeetingContent({ token, meetingId }: { token: string; meetingId: string }) {
+function MeetingContent({ meetingId }: { meetingId: string }) {
   const [state, setState] = useState<PageState>({ type: 'loading' });
 
   const applyResult = useCallback((result: LoadResult) => {
-    if (result.type === 'unauthorized') {
-      clearAccessToken(); // expired or invalid token: back to the login page
-      return;
-    }
+    // Unauthorized: the token was cleared, which redirects to /login.
+    if (result.type === 'unauthorized') return;
     setState(result);
   }, []);
 
   useEffect(() => {
     const controller = new AbortController();
-    fetchMeeting(token, meetingId, controller.signal).then(applyResult, () => {
+    fetchMeeting(meetingId, controller.signal).then(applyResult, () => {
       // Aborted: the page was left or the token changed.
     });
     return () => controller.abort();
-  }, [token, meetingId, applyResult]);
+  }, [meetingId, applyResult]);
 
   // Uploads finishing close together refresh concurrently; only the latest request may apply,
   // and an older one resolves when the latest has applied (so its upload row is removed then).
@@ -161,11 +151,9 @@ function MeetingContent({ token, meetingId }: { token: string; meetingId: string
   /** Reloads the file list after an upload; keeps the page if the reload fails. */
   const refresh = useCallback((): Promise<void> => {
     const id = ++refreshId.current;
-    const run = fetchFiles(token, meetingId).then((result) => {
+    const run = fetchFiles(meetingId).then((result) => {
       if (id !== refreshId.current) return latestRefresh.current;
-      if (result.type === 'unauthorized') {
-        clearAccessToken();
-      } else if (result.type === 'not-found') {
+      if (result.type === 'not-found') {
         setState({ type: 'not-found' });
       } else if (result.type === 'files') {
         setState((current) =>
@@ -175,7 +163,7 @@ function MeetingContent({ token, meetingId }: { token: string; meetingId: string
     });
     latestRefresh.current = run;
     return run;
-  }, [token, meetingId]);
+  }, [meetingId]);
 
   /**
    * Drops a deleted file at once, then reloads the list: the reload supersedes any refresh started

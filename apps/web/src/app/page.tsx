@@ -4,8 +4,9 @@ import { Alert, Button, Card, Skeleton, buttonVariants } from '@heroui/react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import { authorizedFetch } from './api';
 import { clearAccessToken, getEmailFromToken, useAccessToken } from './auth-storage';
-import { API_URL, RECENT_MEETINGS_COUNT, SERVER_UNAVAILABLE_MESSAGE } from './constants';
+import { RECENT_MEETINGS_COUNT, SERVER_UNAVAILABLE_MESSAGE } from './constants';
 import { HeaderProfile } from './header-profile';
 import { formatMeetingDate, type Meeting } from './meetings';
 import { SharedChip } from './shared-chip';
@@ -35,16 +36,11 @@ function HomeContent({ token }: { token: string }) {
   useEffect(() => {
     const controller = new AbortController();
 
-    async function load(accessToken: string) {
+    async function load() {
       try {
-        const response = await fetch(`${API_URL}/meetings`, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-          signal: controller.signal,
-        });
-        if (response.status === 401) {
-          clearAccessToken(); // expired or invalid token: back to the login page
-          return;
-        }
+        // `null` means the token was cleared, which redirects to /login.
+        const response = await authorizedFetch('/meetings', { signal: controller.signal });
+        if (!response) return;
         if (!response.ok) {
           setState({ type: 'error', message: 'Could not load your meetings.' });
           return;
@@ -56,9 +52,9 @@ function HomeContent({ token }: { token: string }) {
       }
     }
 
-    void load(token);
+    void load();
     return () => controller.abort();
-  }, [token]);
+  }, []);
 
   const email = getEmailFromToken(token);
   const meetings = state.type === 'ready' ? state.meetings : [];
