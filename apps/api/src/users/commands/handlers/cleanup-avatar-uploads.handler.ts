@@ -31,8 +31,8 @@ export class CleanupAvatarUploadsHandler implements ICommandHandler<CleanupAvata
         take: BATCH_SIZE,
         select: { id: true },
       });
-      const results = await Promise.all(batch.map(({ id }) => this.cleanUp(id, cutoff)));
-      removed += results.filter(Boolean).length;
+      const removedFlags = await Promise.all(batch.map(({ id }) => this.cleanUp(id, cutoff)));
+      removed += removedFlags.filter(Boolean).length;
       if (batch.length < BATCH_SIZE) {
         return removed;
       }
