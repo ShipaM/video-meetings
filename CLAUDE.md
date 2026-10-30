@@ -74,3 +74,15 @@ questions; drop file contents that can be read again.
 ## Keeping documentation up to date
 
 When the project architecture changes (new app/package, routing, modules, scripts, ports, tooling), update this file and the affected `apps/*/CLAUDE.md` in the same change. Keep each `CLAUDE.md` under 200 lines with only what applies to most tasks: it is loaded into every session, so move workflow-specific instructions into a skill (`.claude/skills/`), which loads only when used.
+
+## Required for every service method
+
+- Every parameter has an explicit TypeScript type
+- The return type is stated explicitly as `Promise<T>`
+- No `console.log`: use `Logger` from `@nestjs/common`
+- Name variables by meaning: not `x`, `data` or `results`
+
+## Before writing new code
+
+- Read the `CLAUDE.md` rules
+- Look at neighboring files that are written correctly
