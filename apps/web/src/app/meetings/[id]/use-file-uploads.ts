@@ -1,17 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { DetailedError, Upload } from 'tus-js-client';
+import { Upload } from 'tus-js-client';
 import { clearAccessToken, getAccessToken } from '../../auth-storage';
-import { API_URL } from '../../constants';
-import {
-  MAX_PARALLEL_UPLOADS,
-  NOT_RETRYABLE_STATUSES,
-  SESSION_EXPIRED_MESSAGE,
-  UPLOAD_CHUNK_SIZE,
-  UPLOAD_ERROR_MESSAGES,
-  UPLOAD_RETRY_DELAYS,
-} from './constants';
+import { MAX_PARALLEL_UPLOADS, NOT_RETRYABLE_STATUSES, SESSION_EXPIRED_MESSAGE } from './constants';
 import { getRejectionReason } from './file-types';
 import { deleteFile } from './files-api';
+import { createTusUpload, getStatus, getUploadError } from './tus-upload';
 
 export type UploadItem = {
   key: string;
@@ -32,25 +25,6 @@ type UploadEntry = {
   /** URL of the upload on the server before this `Upload` has started (set on a retry). */
   resumeUrl: string | null;
 };
-
-function getStatus(error: Error): number | undefined {
-  return error instanceof DetailedError ? error.originalResponse?.getStatus() : undefined;
-}
-
-/** Statuses tus may retry by itself: no answer, server errors and offset conflicts / locks. */
-function isTransient(status: number): boolean {
-  return status === 0 || status >= 500 || status === 409 || status === 423;
-}
-
-/** Maps a failed tus request to a message for the user. */
-function getUploadError(error: Error): string {
-  const status = getStatus(error);
-  if (status === 400 || status === 403 || status === 404 || status === 413 || status === 507) {
-    return UPLOAD_ERROR_MESSAGES[status];
-  }
-  if (status !== undefined && status !== 0) return UPLOAD_ERROR_MESSAGES.server;
-  return navigator.onLine ? UPLOAD_ERROR_MESSAGES.network : UPLOAD_ERROR_MESSAGES.offline;
-}
 
 /**
  * Uploads files to a meeting through the API's resumable tus endpoint: checks each file against
@@ -121,67 +95,47 @@ export function useFileUploads(meetingId: string, onUploaded: () => Promise<void
   );
 
   const createUpload = useCallback(
-    (key: string, file: File, uploadUrl: string | null) => {
-      const upload: Upload = new Upload(file, {
-        endpoint: `${API_URL}/uploads`,
-        // Set on a retry: a fresh `Upload` (with a full set of automatic retries) resumes it.
-        uploadUrl,
-        chunkSize: UPLOAD_CHUNK_SIZE,
-        retryDelays: UPLOAD_RETRY_DELAYS,
-        // Resume only within this page session; after a reload the file is picked again.
-        storeFingerprintForResuming: false,
-        removeFingerprintOnSuccess: true,
-        // Read for every request, so a long upload follows a token change in another tab.
-        onBeforeRequest: (request) => {
-          request.setHeader('Authorization', `Bearer ${getAccessToken() ?? ''}`);
+    (key: string, file: File, uploadUrl: string | null) =>
+      createTusUpload(
+        { file, meetingId, uploadUrl },
+        {
+          isCancelled: () => !uploads.current.has(key),
+          // Cancelled while the creation request was in flight: terminate now that the URL is known.
+          onUploadUrlAvailable: (upload) => {
+            if (uploads.current.has(key) || !upload.url) return;
+            void upload.abort();
+            terminate(upload.url, upload.options);
+            finish(key);
+          },
+          onProgress: (sent, total) => {
+            update(key, { progress: total > 0 ? sent / total : 0 });
+          },
+          onError: (error) => {
+            if (!uploads.current.has(key)) {
+              finish(key); // cancelled while it was being created
+              return;
+            }
+            const status = getStatus(error);
+            const canRetry = status === undefined || !NOT_RETRYABLE_STATUSES.includes(status);
+            const message = status === 401 ? SESSION_EXPIRED_MESSAGE : getUploadError(error);
+            update(key, { status: 'failed', error: message, canRetry });
+            // Nothing left to resume: the server removed what it rejected, or the session ended.
+            if (!canRetry) uploads.current.delete(key);
+            if (status === 401) clearAccessToken(); // expired token: back to the login page
+            finish(key);
+          },
+          onSuccess: () => {
+            const wasCancelled = !uploads.current.delete(key);
+            finish(key);
+            if (wasCancelled) {
+              void onUploadedRef.current(); // finished before the cancel reached it: list it
+              return;
+            }
+            update(key, { status: 'done', progress: 1 });
+            void onUploadedRef.current().finally(() => removeItem(key));
+          },
         },
-        // Once cancelled, only the termination is retried, and never on `409` (stored by then).
-        onShouldRetry: (error) => {
-          const status = getStatus(error) ?? 0;
-          const isCancelled = !uploads.current.has(key);
-          if (isCancelled && (error.originalRequest?.getMethod() !== 'DELETE' || status === 409)) {
-            return false;
-          }
-          return isTransient(status) && navigator.onLine;
-        },
-        metadata: { meetingId, filename: file.name, filetype: file.type },
-        // Cancelled while the creation request was in flight: terminate now that the URL is known.
-        onUploadUrlAvailable: () => {
-          if (uploads.current.has(key) || !upload.url) return;
-          void upload.abort();
-          terminate(upload.url, upload.options);
-          finish(key);
-        },
-        onProgress: (sent, total) => {
-          update(key, { progress: total > 0 ? sent / total : 0 });
-        },
-        onError: (error) => {
-          if (!uploads.current.has(key)) {
-            finish(key); // cancelled while it was being created
-            return;
-          }
-          const status = getStatus(error);
-          const canRetry = status === undefined || !NOT_RETRYABLE_STATUSES.includes(status);
-          const message = status === 401 ? SESSION_EXPIRED_MESSAGE : getUploadError(error);
-          update(key, { status: 'failed', error: message, canRetry });
-          // Nothing left to resume: the server removed what it rejected, or the session ended.
-          if (!canRetry) uploads.current.delete(key);
-          if (status === 401) clearAccessToken(); // expired token: back to the login page
-          finish(key);
-        },
-        onSuccess: () => {
-          const wasCancelled = !uploads.current.delete(key);
-          finish(key);
-          if (wasCancelled) {
-            void onUploadedRef.current(); // finished before the cancel reached it: list it
-            return;
-          }
-          update(key, { status: 'done', progress: 1 });
-          void onUploadedRef.current().finally(() => removeItem(key));
-        },
-      });
-      return upload;
-    },
+      ),
     [meetingId, update, removeItem, finish, terminate],
   );
 
