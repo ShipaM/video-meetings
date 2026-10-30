@@ -3,6 +3,7 @@ import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import type { MeetingFile } from '../../../generated/prisma/client.js';
+import type { RecordingStage } from '../../../generated/prisma/enums.js';
 import { PrismaService } from '../../../prisma/prisma.service.js';
 import { FilesStorageService } from '../../../storage/files-storage.service.js';
 import { RecordingError, extractAudio, probeMedia } from '../../processing/media.js';
@@ -88,6 +89,7 @@ export class ProcessRecordingHandler implements ICommandHandler<ProcessRecording
           ? { pieces: stored, durationMs: file.durationMs ?? 0 }
           : await this.transcribe(file, current, stage);
 
+      await this.enterStage(current, 'SUMMARIZING');
       const summary = await stage(transcriptSummaryTimeoutMs(durationMs), (summarySignal) =>
         this.summarizer.summarize(
           pieces.map((piece) => piece.text).join('\n'),
@@ -147,6 +149,7 @@ export class ProcessRecordingHandler implements ICommandHandler<ProcessRecording
     const limitMinutes = maxRecordingMinutes();
     const limitMs = limitMinutes * 60 * 1000;
 
+    await this.enterStage(current, 'PREPARING_AUDIO');
     const durationMs = await stage(RECORDING_PREPARE_TIMEOUT_MS, async (prepare) => {
       const media = await probeMedia(original, prepare);
       if (media.durationMs !== null) {
@@ -170,6 +173,7 @@ export class ProcessRecordingHandler implements ICommandHandler<ProcessRecording
       return media.durationMs ?? audioMs;
     });
 
+    await this.enterStage(current, 'TRANSCRIBING');
     const pieces = await stage(transcriptionTimeoutMs(durationMs), (transcribeSignal) =>
       this.transcriber.transcribe(audio, transcribeSignal),
     );
@@ -195,6 +199,10 @@ export class ProcessRecordingHandler implements ICommandHandler<ProcessRecording
       { timeout: RESULT_TRANSACTION_TIMEOUT_MS },
     );
     return { pieces, durationMs };
+  }
+
+  private async enterStage(current: JobTarget, processingStage: RecordingStage): Promise<void> {
+    await this.prisma.meetingFile.updateMany({ where: current, data: { processingStage } });
   }
 
   private reasonFor(error: unknown): string {

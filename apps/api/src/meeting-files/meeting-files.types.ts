@@ -1,5 +1,9 @@
 import type { MeetingFile, TranscriptSegment } from '../generated/prisma/client.js';
-import type { MeetingFileKind, MeetingFileStatus } from '../generated/prisma/enums.js';
+import type {
+  MeetingFileKind,
+  MeetingFileStatus,
+  RecordingStage,
+} from '../generated/prisma/enums.js';
 import { isRecording } from './file-types.js';
 import { INLINE_MIME_TYPES, PLAYABLE_MIME_TYPES } from './meeting-files.config.js';
 
@@ -14,6 +18,8 @@ export interface MeetingFileView {
   size: number;
   status: MeetingFileStatus;
   failureReason: string | null;
+  /** How far a recording in `PROCESSING` has come; `null` for any other file. */
+  processingStage: RecordingStage | null;
   /**
    * Whether a link serves the file inline (`disposition=inline`) as a whole, so a page can preview
    * it (PDF, PNG, JPEG).
@@ -39,6 +45,8 @@ export const toMeetingFileView = (file: MeetingFile): MeetingFileView => ({
   size: Number(file.size),
   status: file.status,
   failureReason: file.failureReason,
+  processingStage:
+    file.status === 'PROCESSING' && isRecording(file.kind) ? file.processingStage : null,
   previewable: INLINE_MIME_TYPES.includes(file.mimeType),
   playable: PLAYABLE_MIME_TYPES.includes(file.mimeType),
   durationMs: file.durationMs,
