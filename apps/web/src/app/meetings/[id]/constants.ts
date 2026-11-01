@@ -1,4 +1,4 @@
-import type { MeetingFileKind, MeetingFileStatus } from '../../meetings';
+import type { MeetingFileKind, MeetingFileStatus, RecordingStage } from '../../meetings';
 import type { UploadItem } from './use-file-uploads';
 
 /** 2 GiB, the PRD limit for a single file (same value as `MAX_FILE_SIZE` in the API). */
@@ -77,6 +77,14 @@ export const PROCESSING_TEXT: Record<MeetingFileKind, string> = {
   VIDEO: TRANSCRIBING_TEXT,
   DOCUMENT: 'Summarizing the document.',
   IMAGE: 'Processing the file.',
+};
+
+/** How far a `PROCESSING` recording has come, by its stage. */
+export const RECORDING_STAGE_TEXT: Record<RecordingStage, string> = {
+  QUEUED: 'Waiting in queue',
+  PREPARING_AUDIO: 'Preparing audio',
+  TRANSCRIBING: 'Transcribing',
+  SUMMARIZING: 'Summarizing',
 };
 
 /** Label and chip colour of a stored file's status. */
