@@ -17,7 +17,7 @@
       "branch": "feature/meeting-insights-p1"
     },
     {
-      "milestone": "Meeting insights — Phase 2: API — failures, credentials and the real model",
+      "milestone": "Meeting insights — Phase 2: API — failures, configuration and the real model",
       "branch": "feature/meeting-insights-p2"
     },
     {
