@@ -16,6 +16,7 @@ import {
   PLAYER_FAILED_MESSAGE,
   PREVIEW_FAILED_MESSAGE,
   PROCESSING_TEXT,
+  RECORDING_STAGE_TEXT,
 } from './constants';
 import { FilePreviewPanel, FileSummary, ImageThumbnail, useFileLink } from './file-preview';
 import { getExtension } from './file-types';
@@ -262,7 +263,10 @@ function FileRow({ file, actions }: { file: MeetingFile; actions?: FileActions }
 
       {file.status === 'PROCESSING' && (
         <p className="text-muted text-sm">
-          {PROCESSING_TEXT[file.kind]} The status updates by itself.
+          {file.processingStage
+            ? `${RECORDING_STAGE_TEXT[file.processingStage]}.`
+            : PROCESSING_TEXT[file.kind]}{' '}
+          The status updates by itself.
         </p>
       )}
       {file.status === 'FAILED' && (
