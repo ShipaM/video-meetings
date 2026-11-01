@@ -5,36 +5,32 @@
   "prompt": "Read .claude/ralph.md and follow its instructions. Implement issue #{issue} from milestone '{milestone}' in branch '{branch}'.",
   "phases": [
     {
-      "milestone": "User profile — Phase 1: API tracer bullet — profile with a display name",
-      "branch": "feature/user-profile-p1"
+      "milestone": "Recording stages — Phase 2: UI — show the stage in the file list",
+      "branch": "feature/recording-transcription-stages"
     },
     {
-      "milestone": "User profile — Phase 2: UI — profile page, name editing and the header",
-      "branch": "feature/user-profile-p2"
+      "milestone": "Recording stages — Phase 3: base.en as the default Whisper model",
+      "branch": "feature/recording-transcription-stages"
     },
     {
-      "milestone": "User profile — Phase 3: API — change password",
-      "branch": "feature/user-profile-p3"
+      "milestone": "Meeting insights — Phase 1: API tracer bullet — insights from the recording job",
+      "branch": "feature/meeting-insights-p1"
     },
     {
-      "milestone": "User profile — Phase 4: UI — change password form",
-      "branch": "feature/user-profile-p4"
+      "milestone": "Meeting insights — Phase 2: API — failures, configuration and the real model",
+      "branch": "feature/meeting-insights-p2"
     },
     {
-      "milestone": "User profile — Phase 5: API — avatar upload through tus",
-      "branch": "feature/user-profile-p5"
+      "milestone": "Meeting insights — Phase 3: UI — show the insights on the meeting page",
+      "branch": "feature/meeting-insights-p3"
     },
     {
-      "milestone": "User profile — Phase 6: API — set, remove and deliver the avatar",
-      "branch": "feature/user-profile-p6"
+      "milestone": "Meeting insights — Phase 4: API — manual analysis of older recordings",
+      "branch": "feature/meeting-insights-p4"
     },
     {
-      "milestone": "User profile — Phase 7: API — cleanup of abandoned and unattached avatars",
-      "branch": "feature/user-profile-p7"
-    },
-    {
-      "milestone": "User profile — Phase 8: UI — avatar picker, profile and header avatar",
-      "branch": "feature/user-profile-p8"
+      "milestone": "Meeting insights — Phase 5: UI — the Analyze meeting action",
+      "branch": "feature/meeting-insights-p5"
     }
   ]
 }
