@@ -26,6 +26,7 @@ interface FileDetails {
   mimeType: string;
   status: 'UPLOADING' | 'PROCESSING' | 'READY' | 'FAILED';
   failureReason: string | null;
+  processingStage: 'QUEUED' | 'PREPARING_AUDIO' | 'TRANSCRIBING' | 'SUMMARIZING' | null;
   durationMs: number | null;
   summary: string | null;
   transcript?: Segment[] | null;
@@ -321,6 +322,93 @@ describe('Meeting file transcription (e2e)', () => {
       expect(ready.summary).toContain('Fake speech 1.');
       // Only the summary was made again.
       expect(transcriber.control.calls).toBe(0);
+    });
+  });
+
+  describe('processing stage', () => {
+    const stage = async (token: string, fileId: string) =>
+      ((await details(token, meetingId, fileId).expect(200)).body as FileDetails).processingStage;
+
+    const listedStage = async (token: string, fileId: string) => {
+      const res = await request(server())
+        .get(`/meetings/${meetingId}/files`)
+        .set(auth(token))
+        .expect(200);
+      return (res.body as FileDetails[]).find((file) => file.id === fileId)?.processingStage;
+    };
+
+    it('follows the job for the owner and a participant, and queues the next recording', async () => {
+      const releaseTranscriber = transcriber.control.hold();
+      const releaseSummarizer = summarizer.control.hold();
+      const first = await uploadRecording(ownerToken, meetingId, 'call.mp3');
+      await transcriber.control.started();
+
+      for (const token of [ownerToken, participantToken]) {
+        expect(await stage(token, first)).toBe('TRANSCRIBING');
+        expect(await listedStage(token, first)).toBe('TRANSCRIBING');
+      }
+
+      // Recordings are processed one at a time.
+      const second = await uploadRecording(ownerToken, meetingId, 'call.mp4');
+      expect(await stage(ownerToken, second)).toBe('QUEUED');
+      expect(await listedStage(participantToken, second)).toBe('QUEUED');
+
+      releaseTranscriber();
+      await summarizer.control.started();
+      for (const token of [ownerToken, participantToken]) {
+        expect(await stage(token, first)).toBe('SUMMARIZING');
+        expect(await listedStage(token, first)).toBe('SUMMARIZING');
+      }
+      expect(await stage(ownerToken, second)).toBe('QUEUED');
+
+      releaseSummarizer();
+      expect(await settled(ownerToken, meetingId, first)).toMatchObject({
+        status: 'READY',
+        processingStage: null,
+      });
+      expect(await settled(ownerToken, meetingId, second)).toMatchObject({
+        status: 'READY',
+        processingStage: null,
+      });
+    });
+
+    it('runs the stages again after a retry of a failed transcription', async () => {
+      transcriber.control.behave('fail');
+      const fileId = await uploadRecording(ownerToken, meetingId, 'call.mp3');
+      expect(await settled(ownerToken, meetingId, fileId)).toMatchObject({
+        status: 'FAILED',
+        processingStage: null,
+      });
+
+      transcriber.control.reset();
+      const release = transcriber.control.hold();
+      const res = await retry(ownerToken, meetingId, fileId).expect(202);
+      expect(res.body).toMatchObject({ status: 'PROCESSING', processingStage: 'QUEUED' });
+
+      await transcriber.control.started();
+      expect(await stage(ownerToken, fileId)).toBe('TRANSCRIBING');
+      release();
+      expect(await settled(ownerToken, meetingId, fileId)).toMatchObject({ status: 'READY' });
+    });
+
+    it('goes straight to SUMMARIZING after a retry of a failed summary', async () => {
+      summarizer.control.behave('fail');
+      const fileId = await uploadRecording(ownerToken, meetingId, 'call.mp3');
+      expect(await settled(ownerToken, meetingId, fileId)).toMatchObject({
+        status: 'FAILED',
+        processingStage: null,
+      });
+
+      transcriber.control.reset();
+      summarizer.control.reset();
+      const release = summarizer.control.hold();
+      await retry(ownerToken, meetingId, fileId).expect(202);
+
+      await summarizer.control.started();
+      expect(await stage(ownerToken, fileId)).toBe('SUMMARIZING');
+      expect(transcriber.control.calls).toBe(0);
+      release();
+      expect(await settled(ownerToken, meetingId, fileId)).toMatchObject({ status: 'READY' });
     });
   });
 

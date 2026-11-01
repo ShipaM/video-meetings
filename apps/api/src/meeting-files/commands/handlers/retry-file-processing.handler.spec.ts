@@ -60,7 +60,12 @@ describe('RetryFileProcessingHandler', () => {
         status: 'FAILED',
         kind: { in: ['DOCUMENT', 'AUDIO', 'VIDEO'] },
       },
-      data: { status: 'PROCESSING', failureReason: null, processingAttempt: { increment: 1 } },
+      data: {
+        status: 'PROCESSING',
+        failureReason: null,
+        processingStage: 'QUEUED',
+        processingAttempt: { increment: 1 },
+      },
     });
     expect(queue).toHaveBeenCalledWith(tx, 'DOCUMENT', 'f1', 3);
     expect(findFirst).not.toHaveBeenCalled();

@@ -184,7 +184,11 @@ describe('Meeting file processing (e2e)', () => {
         // The upload request does not wait for the summary.
         const processing = (await details(ownerToken, meetingId, fileId).expect(200))
           .body as FileDetails;
-        expect(processing).toMatchObject({ status: 'PROCESSING', summary: null });
+        expect(processing).toMatchObject({
+          status: 'PROCESSING',
+          summary: null,
+          processingStage: null,
+        });
 
         release();
         const file = await settled(ownerToken, meetingId, fileId);
@@ -259,7 +263,12 @@ describe('Meeting file processing (e2e)', () => {
       const fileId = await upload(ownerToken, meetingId, fakePng(), 'board.png', MIME.png);
 
       const file = (await details(ownerToken, meetingId, fileId).expect(200)).body as FileDetails;
-      expect(file).toMatchObject({ kind: 'IMAGE', status: 'READY', summary: null });
+      expect(file).toMatchObject({
+        kind: 'IMAGE',
+        status: 'READY',
+        summary: null,
+        processingStage: null,
+      });
       expect(summarizer.control.calls).toBe(0);
     });
   });

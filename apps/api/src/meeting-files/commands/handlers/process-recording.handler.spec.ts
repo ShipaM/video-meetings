@@ -94,6 +94,50 @@ describe('ProcessRecordingHandler', () => {
     summarize.mockResolvedValue('- Ship on Friday');
   });
 
+  describe('processing stage', () => {
+    const stages = () =>
+      updateMany.mock.calls
+        .map(([args]) => (args as { data: { processingStage?: string } }).data.processingStage)
+        .filter(Boolean);
+
+    it('enters each stage before its work, conditional on the attempt', async () => {
+      const seen: Record<string, unknown[]> = {};
+      probe.mockImplementation(() => {
+        seen.probe = stages();
+        return Promise.resolve({ durationMs: 3000, hasAudio: true });
+      });
+      transcribe.mockImplementation(() => {
+        seen.transcribe = stages();
+        return Promise.resolve(pieces);
+      });
+      summarize.mockImplementation(() => {
+        seen.summarize = stages();
+        return Promise.resolve('- Ship on Friday');
+      });
+
+      await run();
+
+      expect(seen).toEqual({
+        probe: ['PREPARING_AUDIO'],
+        transcribe: ['PREPARING_AUDIO', 'TRANSCRIBING'],
+        summarize: ['PREPARING_AUDIO', 'TRANSCRIBING', 'SUMMARIZING'],
+      });
+      expect(updateMany).toHaveBeenCalledWith({
+        where: current,
+        data: { processingStage: 'PREPARING_AUDIO' },
+      });
+    });
+
+    it('goes straight to SUMMARIZING with a stored transcript', async () => {
+      findSegments.mockResolvedValue(pieces);
+
+      await run();
+
+      expect(stages()).toEqual(['SUMMARIZING']);
+      expect(probe).not.toHaveBeenCalled();
+    });
+  });
+
   it('stores the transcript, then its summary, and marks the file READY', async () => {
     await run();
 

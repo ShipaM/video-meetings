@@ -27,7 +27,12 @@ export class RetryFileProcessingHandler implements ICommandHandler<RetryFileProc
     const retried = await this.prisma.$transaction(async (tx) => {
       const [processing] = await tx.meetingFile.updateManyAndReturn({
         where: { id: fileId, meetingId, status: 'FAILED', kind: { in: [...PROCESSED_KINDS] } },
-        data: { status: 'PROCESSING', failureReason: null, processingAttempt: { increment: 1 } },
+        data: {
+          status: 'PROCESSING',
+          failureReason: null,
+          processingStage: 'QUEUED',
+          processingAttempt: { increment: 1 },
+        },
       });
       if (processing) {
         await this.processing.queue(tx, processing.kind, fileId, processing.processingAttempt);
