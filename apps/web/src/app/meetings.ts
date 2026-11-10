@@ -25,6 +25,23 @@ export type MeetingFileKind = 'AUDIO' | 'VIDEO' | 'DOCUMENT' | 'IMAGE';
 
 export type RecordingStage = 'QUEUED' | 'PREPARING_AUDIO' | 'TRANSCRIBING' | 'SUMMARIZING';
 
+/** A task named in a meeting; `assignee` is `null` when nobody was named. */
+export type ActionItem = {
+  description: string;
+  assignee: string | null;
+};
+
+/** A decision taken in a meeting. */
+export type Decision = {
+  text: string;
+};
+
+/** The action items and decisions of a recording (its summary is the file's `summary`). */
+export type RecordingInsights = {
+  actionItems: ActionItem[];
+  decisions: Decision[];
+};
+
 /** A meeting file as returned by `GET /meetings/:id/files` (and its details route). */
 export type MeetingFile = {
   id: string;
@@ -46,6 +63,8 @@ export type MeetingFile = {
   durationMs: number | null;
   /** Summary of a `READY` document or recording, `null` before, on failure and for images. */
   summary: string | null;
+  /** Action items and decisions of a `READY` recording, `null` otherwise and for documents. */
+  insights: RecordingInsights | null;
   createdAt: string;
   completedAt: string | null;
 };
