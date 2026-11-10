@@ -136,7 +136,7 @@ export interface WhisperSettings {
 /** whisper.cpp settings for `AI_PROVIDER=local`; a missing model file fails at startup. */
 export function whisperSettings(): WhisperSettings {
   const modelsDir = path.resolve(process.env.WHISPER_MODELS_DIR || './models');
-  const modelPath = path.join(modelsDir, `ggml-${process.env.WHISPER_MODEL || 'small.en'}.bin`);
+  const modelPath = path.join(modelsDir, `ggml-${process.env.WHISPER_MODEL || 'base.en'}.bin`);
   if (!existsSync(modelPath)) {
     throw new Error(`Whisper model not found at ${modelPath} (needed with AI_PROVIDER=local)`);
   }
