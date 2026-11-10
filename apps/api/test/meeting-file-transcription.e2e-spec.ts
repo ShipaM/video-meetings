@@ -407,6 +407,91 @@ describe('Meeting file transcription (e2e)', () => {
       const inList = await listed(participantToken, fileId);
       expect(inList).toMatchObject({ status: 'READY', summary: file.summary, insights: null });
     });
+
+    describe('analysis failures', () => {
+      const storedInsights = (fileId: string) =>
+        app.get(PrismaService).recordingInsights.findUnique({ where: { fileId } });
+
+      it('fails with "Summary could not be generated" and stores no result', async () => {
+        analyzer.control.behave('fail');
+        const fileId = await uploadRecording(ownerToken, meetingId, 'call.mp3');
+
+        const file = await settled(ownerToken, meetingId, fileId);
+        expect(file).toMatchObject({
+          status: 'FAILED',
+          failureReason: 'Summary could not be generated',
+          summary: null,
+          insights: null,
+          transcript: null,
+        });
+        expect(await storedInsights(fileId)).toBeNull();
+        expect(await listed(participantToken, fileId)).toMatchObject({
+          status: 'FAILED',
+          summary: null,
+          insights: null,
+        });
+        // The transcript is kept (not shown) for a retry.
+        expect(await app.get(PrismaService).transcriptSegment.count({ where: { fileId } })).toBe(3);
+        expect(await workDirExists(fileId)).toBe(false);
+      });
+
+      it('fails with "Processing took too long" when the analyzer hangs', async () => {
+        analyzer.control.behave('hang');
+        const fileId = await uploadRecording(ownerToken, meetingId, 'call.mp3');
+
+        // Times out after DOCUMENT_PROCESSING_TIMEOUT_SECONDS (3 s in the e2e config) per started hour.
+        const file = await settled(ownerToken, meetingId, fileId);
+        expect(file).toMatchObject({
+          status: 'FAILED',
+          failureReason: 'Processing took too long',
+          summary: null,
+          insights: null,
+        });
+        expect(await storedInsights(fileId)).toBeNull();
+        expect(await workDirExists(fileId)).toBe(false);
+      });
+
+      it('a retry reuses the stored transcript: the transcriber is not called', async () => {
+        analyzer.control.behave('fail');
+        const fileId = await uploadRecording(ownerToken, meetingId, 'call.mp3');
+        await settled(ownerToken, meetingId, fileId);
+
+        transcriber.control.reset();
+        analyzer.control.reset();
+        await retry(ownerToken, meetingId, fileId).expect(202);
+
+        const file = await settled(ownerToken, meetingId, fileId);
+        expect(file).toMatchObject({ status: 'READY', failureReason: null });
+        expect(file.insights).toEqual(fakeInsights);
+        expect(file.summary).toContain('Fake speech 1. Fake speech 2. Fake speech 3.');
+        expect(file.transcript).toHaveLength(3);
+        expect(transcriber.control.calls).toBe(0);
+        expect(analyzer.control.calls).toBe(1);
+      });
+
+      it('deleting during the analysis brings back neither the file nor its insights', async () => {
+        const release = analyzer.control.hold();
+        const fileId = await uploadRecording(ownerToken, meetingId, 'call.mp3');
+        await analyzer.control.started();
+
+        await request(server())
+          .delete(`/meetings/${meetingId}/files/${fileId}`)
+          .set(auth(ownerToken))
+          .expect(204);
+
+        // The analysis finishes after the file is gone.
+        release();
+        await analyzer.control.finished();
+        await new Promise((resolve) => setTimeout(resolve, 500));
+
+        const prisma = app.get(PrismaService);
+        expect(await prisma.meetingFile.findUnique({ where: { id: fileId } })).toBeNull();
+        expect(await prisma.transcriptSegment.count({ where: { fileId } })).toBe(0);
+        expect(await storedInsights(fileId)).toBeNull();
+        expect(await workDirExists(fileId)).toBe(false);
+        await details(ownerToken, meetingId, fileId).expect(404);
+      });
+    });
   });
 
   describe('processing stage', () => {

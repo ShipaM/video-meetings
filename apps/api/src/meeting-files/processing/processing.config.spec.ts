@@ -8,6 +8,10 @@ import {
   transcriptionTimeoutMs,
   whisperSettings,
 } from './processing.config.js';
+import { FakeMeetingAnalyzer } from './fake-meeting-analyzer.js';
+import type { MeetingAnalyzer } from './meeting-analyzer.js';
+import { MeetingAnalyzerProvider } from './meeting-analyzer.provider.js';
+import { OllamaMeetingAnalyzer } from './ollama-meeting-analyzer.js';
 import type { Transcriber } from './transcriber.js';
 import { TranscriberProvider } from './transcriber.provider.js';
 
@@ -42,6 +46,36 @@ describe('recording timeouts', () => {
     vi.stubEnv('MAX_RECORDING_MINUTES', '900');
 
     expect(() => recordingJobExpirationSeconds()).toThrow(/MAX_RECORDING_MINUTES=900/);
+  });
+});
+
+describe('meeting analyzer provider', () => {
+  const provider = MeetingAnalyzerProvider as FactoryProvider<MeetingAnalyzer>;
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('refuses to start with AI_PROVIDER=local without OLLAMA_MODEL', () => {
+    vi.stubEnv('AI_PROVIDER', 'local');
+    vi.stubEnv('OLLAMA_MODEL', '');
+
+    expect(() => provider.useFactory()).toThrow(/OLLAMA_MODEL is not set/);
+  });
+
+  it('uses the local model with AI_PROVIDER=local and OLLAMA_MODEL', () => {
+    vi.stubEnv('AI_PROVIDER', 'local');
+    vi.stubEnv('OLLAMA_MODEL', 'qwen3:4b');
+
+    expect(provider.useFactory()).toBeInstanceOf(OllamaMeetingAnalyzer);
+  });
+
+  it('needs no Ollama settings with AI_PROVIDER=fake', () => {
+    vi.stubEnv('AI_PROVIDER', 'fake');
+    vi.stubEnv('OLLAMA_MODEL', '');
+    vi.stubEnv('OLLAMA_URL', '');
+
+    expect(provider.useFactory()).toBeInstanceOf(FakeMeetingAnalyzer);
   });
 });
 
