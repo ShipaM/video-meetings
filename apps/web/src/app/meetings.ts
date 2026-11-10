@@ -23,6 +23,8 @@ export type MeetingFileStatus = 'UPLOADING' | 'PROCESSING' | 'READY' | 'FAILED';
 
 export type MeetingFileKind = 'AUDIO' | 'VIDEO' | 'DOCUMENT' | 'IMAGE';
 
+export type RecordingStage = 'QUEUED' | 'PREPARING_AUDIO' | 'TRANSCRIBING' | 'SUMMARIZING';
+
 /** A meeting file as returned by `GET /meetings/:id/files` (and its details route). */
 export type MeetingFile = {
   id: string;
@@ -34,6 +36,8 @@ export type MeetingFile = {
   status: MeetingFileStatus;
   /** Short reason of a `FAILED` file, `null` otherwise. */
   failureReason: string | null;
+  /** How far a recording in `PROCESSING` has come, `null` for any other file. */
+  processingStage: RecordingStage | null;
   /** The API serves it inline (PDF, PNG, JPEG), so the page can preview it. */
   previewable: boolean;
   /** The API serves it inline with byte ranges (audio, video), so the page can play it. */

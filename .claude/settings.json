@@ -14,6 +14,7 @@
       "Bash(git *)",
       "Bash(gh *)",
       "Bash(npx prisma *)",
+      "Bash(npx tsc *)",
       "mcp__playwright"
     ]
   },
