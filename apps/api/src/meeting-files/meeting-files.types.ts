@@ -1,4 +1,10 @@
-import type { MeetingFile, TranscriptSegment } from '../generated/prisma/client.js';
+import type {
+  ActionItem,
+  MeetingDecision,
+  MeetingFile,
+  RecordingInsights,
+  TranscriptSegment,
+} from '../generated/prisma/client.js';
 import type {
   MeetingFileKind,
   MeetingFileStatus,
@@ -6,6 +12,7 @@ import type {
 } from '../generated/prisma/enums.js';
 import { isRecording } from './file-types.js';
 import { INLINE_MIME_TYPES, PLAYABLE_MIME_TYPES } from './meeting-files.config.js';
+import type { ActionItemInsight, DecisionInsight } from './processing/meeting-analyzer.js';
 
 /** A meeting file as returned by the API (the storage key stays internal). */
 export interface MeetingFileView {
@@ -55,15 +62,49 @@ export const toMeetingFileView = (file: MeetingFile): MeetingFileView => ({
   completedAt: file.completedAt,
 });
 
-/** A file with its summary, as listed (`GET /meetings/:id/files`). */
-export interface MeetingFileListItem extends MeetingFileView {
-  /** Set once a document or a recording is `READY`; `null` before, on failure and for images. */
-  summary: string | null;
+/** The action items and decisions of a recording (its summary is the file's `summary`). */
+export interface RecordingInsightsView {
+  actionItems: ActionItemInsight[];
+  decisions: DecisionInsight[];
 }
 
-export const toMeetingFileListItem = (
-  file: MeetingFile & { summary: { text: string } | null },
-): MeetingFileListItem => ({ ...toMeetingFileView(file), summary: file.summary?.text ?? null });
+/** What the views include of a file's insights: the lists in their stored order. */
+export const INSIGHTS_INCLUDE = {
+  include: {
+    actionItems: { orderBy: { position: 'asc' } },
+    decisions: { orderBy: { position: 'asc' } },
+  },
+} as const;
+
+/** A file with its summary and insights, as listed (`GET /meetings/:id/files`). */
+export interface MeetingFileListItem extends MeetingFileView {
+  /**
+   * Set once a document or a recording is `READY`: the insights' summary of a recording analyzed
+   * with them, else the older summary; `null` before, on failure and for images.
+   */
+  summary: string | null;
+  /** The action items and decisions once a recording is `READY`; `null` otherwise and for documents. */
+  insights: RecordingInsightsView | null;
+}
+
+/** A file as the list and details read it, with its summary and insights. */
+type FileWithResults = MeetingFile & {
+  summary: { text: string } | null;
+  insights:
+    (RecordingInsights & { actionItems: ActionItem[]; decisions: MeetingDecision[] }) | null;
+};
+
+export const toMeetingFileListItem = (file: FileWithResults): MeetingFileListItem => ({
+  ...toMeetingFileView(file),
+  summary: file.insights?.summary ?? file.summary?.text ?? null,
+  insights: file.insights && {
+    actionItems: file.insights.actionItems.map(({ description, assignee }) => ({
+      description,
+      assignee,
+    })),
+    decisions: file.insights.decisions.map(({ text }) => ({ text })),
+  },
+});
 
 /** A timed piece of a recording's transcript. */
 export interface TranscriptSegmentView {
@@ -83,7 +124,7 @@ export interface MeetingFileDetails extends MeetingFileListItem {
 }
 
 export const toMeetingFileDetails = (
-  file: MeetingFile & { summary: { text: string } | null; transcript: TranscriptSegment[] },
+  file: FileWithResults & { transcript: TranscriptSegment[] },
 ): MeetingFileDetails => ({
   ...toMeetingFileListItem(file),
   // Segments are kept after a failed summary (for the retry), so READY decides.

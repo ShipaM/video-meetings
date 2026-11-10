@@ -123,6 +123,7 @@ model MeetingFile {
   // Meaningful only for a recording in PROCESSING; the API returns null otherwise.
   processingStage   RecordingStage      @default(QUEUED)
   summary           MeetingFileSummary?
+  insights          RecordingInsights?  @relation("FileInsights")
   transcript        TranscriptSegment[]
 
   @@index([meetingId, status])
@@ -147,4 +148,47 @@ model TranscriptSegment {
   text     String
 
   @@id([fileId, position])
+}
+
+// What the analysis of a recording's transcript produced; goes with the file. Kept apart from
+// MeetingFileSummary, so a recording with empty lists still has insights.
+model RecordingInsights {
+  id          String            @id @default(uuid())
+  fileId      String            @unique
+  file        MeetingFile       @relation("FileInsights", fields: [fileId], references: [id], onDelete: Cascade)
+  summary     String
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  actionItems ActionItem[]      @relation("InsightsActionItems")
+  decisions   MeetingDecision[] @relation("InsightsDecisions")
+}
+
+// A task named in the meeting; `position` orders the items of one result.
+model ActionItem {
+  id          String            @id @default(uuid())
+  insightsId  String
+  insights    RecordingInsights @relation("InsightsActionItems", fields: [insightsId], references: [id], onDelete: Cascade)
+  position    Int
+  description String
+  // The person the task was given to; null when nobody was named.
+  assignee    String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@unique([insightsId, position])
+  @@index([insightsId])
+}
+
+// A decision taken in the meeting; `position` orders the decisions of one result.
+model MeetingDecision {
+  id         String            @id @default(uuid())
+  insightsId String
+  insights   RecordingInsights @relation("InsightsDecisions", fields: [insightsId], references: [id], onDelete: Cascade)
+  position   Int
+  text       String
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  @@unique([insightsId, position])
+  @@index([insightsId])
 }

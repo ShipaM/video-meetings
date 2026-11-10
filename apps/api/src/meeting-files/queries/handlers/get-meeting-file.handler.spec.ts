@@ -34,25 +34,82 @@ describe('GetMeetingFileHandler', () => {
   });
 
   it('returns the file with its summary to anyone who may view the meeting', async () => {
-    findFirst.mockResolvedValue({ ...file, summary: { text: '- Ship it' }, transcript: [] });
+    findFirst.mockResolvedValue({
+      ...file,
+      summary: { text: '- Ship it' },
+      insights: null,
+      transcript: [],
+    });
 
     const details = await handler.execute(new GetMeetingFileQuery('u1', 'm1', 'f1'));
 
     expect(execute).toHaveBeenCalledWith(new GetMeetingQuery('u1', 'm1'));
     expect(findFirst).toHaveBeenCalledWith({
       where: { id: 'f1', meetingId: 'm1', status: { not: 'UPLOADING' } },
-      include: { summary: true, transcript: { orderBy: { position: 'asc' } } },
+      include: {
+        summary: true,
+        insights: {
+          include: {
+            actionItems: { orderBy: { position: 'asc' } },
+            decisions: { orderBy: { position: 'asc' } },
+          },
+        },
+        transcript: { orderBy: { position: 'asc' } },
+      },
     });
-    expect(details).toMatchObject({ id: 'f1', size: 42, summary: '- Ship it', transcript: null });
+    expect(details).toMatchObject({
+      id: 'f1',
+      size: 42,
+      summary: '- Ship it',
+      insights: null,
+      transcript: null,
+    });
     expect(details).not.toHaveProperty('storageKey');
   });
 
   it('gives a null summary before processing has finished', async () => {
-    findFirst.mockResolvedValue({ ...file, status: 'PROCESSING', summary: null, transcript: [] });
+    findFirst.mockResolvedValue({
+      ...file,
+      status: 'PROCESSING',
+      summary: null,
+      insights: null,
+      transcript: [],
+    });
 
     await expect(handler.execute(new GetMeetingFileQuery('u1', 'm1', 'f1'))).resolves.toMatchObject(
-      { status: 'PROCESSING', summary: null },
+      { status: 'PROCESSING', summary: null, insights: null },
     );
+  });
+
+  it('returns the insights of a recording, with their summary over an older one', async () => {
+    findFirst.mockResolvedValue({
+      ...file,
+      kind: 'AUDIO',
+      mimeType: 'audio/mpeg',
+      summary: { text: '- An older summary' },
+      insights: {
+        id: 'i1',
+        fileId: 'f1',
+        summary: '- Ship on Friday',
+        actionItems: [
+          { id: 'a1', position: 0, description: 'Fix the bug', assignee: 'Mark' },
+          { id: 'a2', position: 1, description: 'Write the notes', assignee: null },
+        ],
+        decisions: [{ id: 'd1', position: 0, text: 'Ship on Friday' }],
+      },
+      transcript: [],
+    });
+
+    const details = await handler.execute(new GetMeetingFileQuery('u1', 'm1', 'f1'));
+
+    expect(details.summary).toBe('- Ship on Friday');
+    expect(details.insights).toEqual({
+      actionItems: [
+        { description: 'Fix the bug', assignee: 'Mark' },
+        { description: 'Write the notes', assignee: null },
+      ],
+      decisions: [{ text: 'Ship on Friday' }],
+    });
   });
 
   it('returns the transcript and duration of a READY recording', async () => {
@@ -62,6 +119,7 @@ describe('GetMeetingFileHandler', () => {
       mimeType: 'audio/mpeg',
       durationMs: 2500,
       summary: { text: '- Ship it' },
+      insights: null,
       transcript: [
         { fileId: 'f1', position: 0, startMs: 0, endMs: 1200, text: 'Hello.' },
         { fileId: 'f1', position: 1, startMs: 1200, endMs: 2500, text: 'Ship it.' },

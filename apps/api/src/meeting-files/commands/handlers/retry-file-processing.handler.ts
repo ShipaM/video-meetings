@@ -51,6 +51,6 @@ export class RetryFileProcessingHandler implements ICommandHandler<RetryFileProc
         : new NotFoundException('File not found');
     }
     // A FAILED file has no results: they are only stored together with READY.
-    return toMeetingFileDetails({ ...retried, summary: null, transcript: [] });
+    return toMeetingFileDetails({ ...retried, summary: null, insights: null, transcript: [] });
   }
 }

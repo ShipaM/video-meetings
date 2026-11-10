@@ -6,9 +6,9 @@ import path from 'node:path';
 import type { Server } from 'node:http';
 import request from 'supertest';
 import { AppModule } from './../src/app.module.js';
+import { FakeMeetingAnalyzer } from './../src/meeting-files/processing/fake-meeting-analyzer.js';
 import { FakeTranscriber } from './../src/meeting-files/processing/fake-transcriber.js';
-import { FakeSummarizer } from './../src/meeting-files/processing/fake-summarizer.js';
-import { Summarizer } from './../src/meeting-files/processing/summarizer.js';
+import { MeetingAnalyzer } from './../src/meeting-files/processing/meeting-analyzer.js';
 import { Transcriber } from './../src/meeting-files/processing/transcriber.js';
 import { PrismaService } from './../src/prisma/prisma.service.js';
 import { makeRecording } from './media.helpers.js';
@@ -20,6 +20,11 @@ interface Segment {
   text: string;
 }
 
+interface Insights {
+  actionItems: { description: string; assignee: string | null }[];
+  decisions: { text: string }[];
+}
+
 interface FileDetails {
   id: string;
   kind: string;
@@ -29,10 +34,12 @@ interface FileDetails {
   processingStage: 'QUEUED' | 'PREPARING_AUDIO' | 'TRANSCRIBING' | 'SUMMARIZING' | null;
   durationMs: number | null;
   summary: string | null;
+  insights?: Insights | null;
   transcript?: Segment[] | null;
 }
 
-const MIME = { mp3: 'audio/mpeg', mp4: 'video/mp4' } as const;
+const MIME = { mp3: 'audio/mpeg', mp4: 'video/mp4', txt: 'text/plain' } as const;
+const FIXTURES = path.join(import.meta.dirname, 'fixtures');
 /** The e2e config sets `MAX_RECORDING_MINUTES=1`. */
 const LIMIT_MS = 60_000;
 
@@ -41,7 +48,7 @@ describe('Meeting file transcription (e2e)', () => {
   let filesDir: string;
   let mediaDir: string;
   let transcriber: FakeTranscriber;
-  let summarizer: FakeSummarizer;
+  let analyzer: FakeMeetingAnalyzer;
   const recordings: Record<string, string> = {};
 
   const password = 'Str0ngPassw0rd!';
@@ -160,7 +167,7 @@ describe('Meeting file transcription (e2e)', () => {
     app.useGlobalPipes(new ValidationPipe({ whitelist: true }));
     await app.init();
     transcriber = app.get<Transcriber, FakeTranscriber>(Transcriber);
-    summarizer = app.get<Summarizer, FakeSummarizer>(Summarizer);
+    analyzer = app.get<MeetingAnalyzer, FakeMeetingAnalyzer>(MeetingAnalyzer);
 
     ownerToken = await signUp('transcription-owner');
     participantToken = await signUp('transcription-participant');
@@ -180,7 +187,7 @@ describe('Meeting file transcription (e2e)', () => {
 
   afterEach(() => {
     transcriber.control.reset();
-    summarizer.control.reset();
+    analyzer.control.reset();
   });
 
   afterAll(async () => {
@@ -278,7 +285,7 @@ describe('Meeting file transcription (e2e)', () => {
         status: 'FAILED',
         failureReason: 'No speech found in the recording',
       });
-      expect(summarizer.control.calls).toBe(0);
+      expect(analyzer.control.calls).toBe(0);
     });
 
     it('fails a file whose media cannot be decoded', async () => {
@@ -303,7 +310,7 @@ describe('Meeting file transcription (e2e)', () => {
     });
 
     it('fails when the transcript cannot be summarized; a retry reuses the transcript', async () => {
-      summarizer.control.behave('fail');
+      analyzer.control.behave('fail');
       const fileId = await uploadRecording(ownerToken, meetingId, 'call.mp3');
 
       const file = await settled(ownerToken, meetingId, fileId);
@@ -314,7 +321,7 @@ describe('Meeting file transcription (e2e)', () => {
       });
 
       transcriber.control.reset();
-      summarizer.control.behave('ok');
+      analyzer.control.behave('ok');
       await retry(ownerToken, meetingId, fileId).expect(202);
       const ready = await settled(ownerToken, meetingId, fileId);
       expect(ready).toMatchObject({ status: 'READY' });
@@ -322,6 +329,83 @@ describe('Meeting file transcription (e2e)', () => {
       expect(ready.summary).toContain('Fake speech 1.');
       // Only the summary was made again.
       expect(transcriber.control.calls).toBe(0);
+    });
+  });
+
+  describe('insights', () => {
+    /**
+     * The fake analyzer quotes the transcript: a summary, an action item with an assignee, one
+     * without (nobody was named), and a decision.
+     */
+    const fakeInsights: Insights = {
+      actionItems: [
+        {
+          description: expect.stringContaining('Fake speech') as string,
+          assignee: expect.stringMatching(/\S/) as string,
+        },
+        { description: expect.stringContaining('Fake speech') as string, assignee: null },
+      ],
+      decisions: [{ text: expect.stringContaining('Fake speech') as string }],
+    };
+
+    const listed = async (token: string, fileId: string) => {
+      const res = await request(server())
+        .get(`/meetings/${meetingId}/files`)
+        .set(auth(token))
+        .expect(200);
+      return (res.body as FileDetails[]).find((file) => file.id === fileId);
+    };
+
+    it('ends a recording READY with a summary, action items and decisions in the details and the list', async () => {
+      const fileId = await uploadRecording(ownerToken, meetingId, 'call.mp3');
+
+      const file = await settled(ownerToken, meetingId, fileId);
+      expect(file).toMatchObject({ status: 'READY', failureReason: null });
+      expect(file.summary).toContain('Fake speech 1. Fake speech 2. Fake speech 3.');
+      expect(file.insights).toEqual(fakeInsights);
+
+      const inList = await listed(ownerToken, fileId);
+      expect(inList?.summary).toBe(file.summary);
+      expect(inList?.insights).toEqual(file.insights);
+    });
+
+    it('gives the owner and a participant the same summary and insights', async () => {
+      const fileId = await uploadRecording(ownerToken, meetingId, 'call.mp4');
+      const owners = await settled(ownerToken, meetingId, fileId);
+
+      const participants = (await details(participantToken, meetingId, fileId).expect(200))
+        .body as FileDetails;
+      expect(participants.summary).toBe(owners.summary);
+      expect(participants.insights).toEqual(owners.insights);
+      expect(participants.insights).toEqual(fakeInsights);
+
+      const inList = await listed(participantToken, fileId);
+      expect(inList?.summary).toBe(owners.summary);
+      expect(inList?.insights).toEqual(owners.insights);
+    });
+
+    it('returns an action item without an assignee as null, not an invented name', async () => {
+      const fileId = await uploadRecording(ownerToken, meetingId, 'call.mp3');
+
+      const file = await settled(ownerToken, meetingId, fileId);
+      const unassigned = file.insights?.actionItems.filter((item) => item.assignee === null);
+      expect(unassigned).toHaveLength(1);
+      expect(unassigned?.[0]).toEqual({
+        description: expect.stringContaining('Fake speech') as string,
+        assignee: null,
+      });
+    });
+
+    it('gives a document a summary and insights: null', async () => {
+      const data = await readFile(path.join(FIXTURES, 'notes.txt'));
+      const fileId = await upload(ownerToken, meetingId, data, 'notes.txt');
+
+      const file = await settled(ownerToken, meetingId, fileId);
+      expect(file).toMatchObject({ status: 'READY', insights: null });
+      expect(file.summary).toEqual(expect.any(String));
+
+      const inList = await listed(participantToken, fileId);
+      expect(inList).toMatchObject({ status: 'READY', summary: file.summary, insights: null });
     });
   });
 
@@ -339,7 +423,7 @@ describe('Meeting file transcription (e2e)', () => {
 
     it('follows the job for the owner and a participant, and queues the next recording', async () => {
       const releaseTranscriber = transcriber.control.hold();
-      const releaseSummarizer = summarizer.control.hold();
+      const releaseSummarizer = analyzer.control.hold();
       const first = await uploadRecording(ownerToken, meetingId, 'call.mp3');
       await transcriber.control.started();
 
@@ -354,7 +438,7 @@ describe('Meeting file transcription (e2e)', () => {
       expect(await listedStage(participantToken, second)).toBe('QUEUED');
 
       releaseTranscriber();
-      await summarizer.control.started();
+      await analyzer.control.started();
       for (const token of [ownerToken, participantToken]) {
         expect(await stage(token, first)).toBe('SUMMARIZING');
         expect(await listedStage(token, first)).toBe('SUMMARIZING');
@@ -392,7 +476,7 @@ describe('Meeting file transcription (e2e)', () => {
     });
 
     it('goes straight to SUMMARIZING after a retry of a failed summary', async () => {
-      summarizer.control.behave('fail');
+      analyzer.control.behave('fail');
       const fileId = await uploadRecording(ownerToken, meetingId, 'call.mp3');
       expect(await settled(ownerToken, meetingId, fileId)).toMatchObject({
         status: 'FAILED',
@@ -400,11 +484,11 @@ describe('Meeting file transcription (e2e)', () => {
       });
 
       transcriber.control.reset();
-      summarizer.control.reset();
-      const release = summarizer.control.hold();
+      analyzer.control.reset();
+      const release = analyzer.control.hold();
       await retry(ownerToken, meetingId, fileId).expect(202);
 
-      await summarizer.control.started();
+      await analyzer.control.started();
       expect(await stage(ownerToken, fileId)).toBe('SUMMARIZING');
       expect(transcriber.control.calls).toBe(0);
       release();
@@ -457,19 +541,53 @@ describe('Meeting file transcription (e2e)', () => {
       await details(strangerToken, meetingId, fileId).expect(404);
     });
 
-    it('deletes the transcript and summary with the file', async () => {
+    it('deletes the transcript and insights with the file', async () => {
       const fileId = await uploadRecording(ownerToken, meetingId, 'call.mp3');
       await settled(ownerToken, meetingId, fileId);
+      const prisma = app.get(PrismaService);
+      const insights = await prisma.recordingInsights.findUniqueOrThrow({ where: { fileId } });
 
       await request(server())
         .delete(`/meetings/${meetingId}/files/${fileId}`)
         .set(auth(ownerToken))
         .expect(204);
 
-      const prisma = app.get(PrismaService);
       expect(await prisma.transcriptSegment.count({ where: { fileId } })).toBe(0);
-      expect(await prisma.meetingFileSummary.findUnique({ where: { fileId } })).toBeNull();
+      expect(await prisma.recordingInsights.findUnique({ where: { fileId } })).toBeNull();
+      expect(await prisma.actionItem.count({ where: { insightsId: insights.id } })).toBe(0);
+      expect(await prisma.meetingDecision.count({ where: { insightsId: insights.id } })).toBe(0);
       await details(ownerToken, meetingId, fileId).expect(404);
+    });
+
+    it('deletes the insights, their action items and decisions with the file', async () => {
+      const fileId = await uploadRecording(ownerToken, meetingId, 'call.mp3');
+      await settled(ownerToken, meetingId, fileId);
+
+      const prisma = app.get(PrismaService);
+      const insights = await prisma.recordingInsights.upsert({
+        where: { fileId },
+        update: {},
+        create: {
+          fileId,
+          summary: 'A summary.',
+          actionItems: {
+            create: [
+              { position: 0, description: 'Send the notes', assignee: 'Alice' },
+              { position: 1, description: 'Book a room' },
+            ],
+          },
+          decisions: { create: [{ position: 0, text: 'Ship on Friday' }] },
+        },
+      });
+
+      await request(server())
+        .delete(`/meetings/${meetingId}/files/${fileId}`)
+        .set(auth(ownerToken))
+        .expect(204);
+
+      expect(await prisma.recordingInsights.findUnique({ where: { fileId } })).toBeNull();
+      expect(await prisma.actionItem.count({ where: { insightsId: insights.id } })).toBe(0);
+      expect(await prisma.meetingDecision.count({ where: { insightsId: insights.id } })).toBe(0);
     });
 
     it('deleting during transcription brings back neither the file nor its transcript', async () => {
@@ -490,7 +608,7 @@ describe('Meeting file transcription (e2e)', () => {
       const prisma = app.get(PrismaService);
       expect(await prisma.meetingFile.findUnique({ where: { id: fileId } })).toBeNull();
       expect(await prisma.transcriptSegment.count({ where: { fileId } })).toBe(0);
-      expect(await prisma.meetingFileSummary.findUnique({ where: { fileId } })).toBeNull();
+      expect(await prisma.recordingInsights.findUnique({ where: { fileId } })).toBeNull();
       expect(await workDirExists(fileId)).toBe(false);
     });
   });
