@@ -20,6 +20,11 @@ interface Segment {
   text: string;
 }
 
+interface Insights {
+  actionItems: { description: string; assignee: string | null }[];
+  decisions: { text: string }[];
+}
+
 interface FileDetails {
   id: string;
   kind: string;
@@ -29,10 +34,12 @@ interface FileDetails {
   processingStage: 'QUEUED' | 'PREPARING_AUDIO' | 'TRANSCRIBING' | 'SUMMARIZING' | null;
   durationMs: number | null;
   summary: string | null;
+  insights?: Insights | null;
   transcript?: Segment[] | null;
 }
 
-const MIME = { mp3: 'audio/mpeg', mp4: 'video/mp4' } as const;
+const MIME = { mp3: 'audio/mpeg', mp4: 'video/mp4', txt: 'text/plain' } as const;
+const FIXTURES = path.join(import.meta.dirname, 'fixtures');
 /** The e2e config sets `MAX_RECORDING_MINUTES=1`. */
 const LIMIT_MS = 60_000;
 
@@ -322,6 +329,83 @@ describe('Meeting file transcription (e2e)', () => {
       expect(ready.summary).toContain('Fake speech 1.');
       // Only the summary was made again.
       expect(transcriber.control.calls).toBe(0);
+    });
+  });
+
+  describe('insights', () => {
+    /**
+     * The fake analyzer quotes the transcript: a summary, an action item with an assignee, one
+     * without (nobody was named), and a decision.
+     */
+    const fakeInsights: Insights = {
+      actionItems: [
+        {
+          description: expect.stringContaining('Fake speech') as string,
+          assignee: expect.stringMatching(/\S/) as string,
+        },
+        { description: expect.stringContaining('Fake speech') as string, assignee: null },
+      ],
+      decisions: [{ text: expect.stringContaining('Fake speech') as string }],
+    };
+
+    const listed = async (token: string, fileId: string) => {
+      const res = await request(server())
+        .get(`/meetings/${meetingId}/files`)
+        .set(auth(token))
+        .expect(200);
+      return (res.body as FileDetails[]).find((file) => file.id === fileId);
+    };
+
+    it('ends a recording READY with a summary, action items and decisions in the details and the list', async () => {
+      const fileId = await uploadRecording(ownerToken, meetingId, 'call.mp3');
+
+      const file = await settled(ownerToken, meetingId, fileId);
+      expect(file).toMatchObject({ status: 'READY', failureReason: null });
+      expect(file.summary).toContain('Fake speech 1. Fake speech 2. Fake speech 3.');
+      expect(file.insights).toEqual(fakeInsights);
+
+      const inList = await listed(ownerToken, fileId);
+      expect(inList?.summary).toBe(file.summary);
+      expect(inList?.insights).toEqual(file.insights);
+    });
+
+    it('gives the owner and a participant the same summary and insights', async () => {
+      const fileId = await uploadRecording(ownerToken, meetingId, 'call.mp4');
+      const owners = await settled(ownerToken, meetingId, fileId);
+
+      const participants = (await details(participantToken, meetingId, fileId).expect(200))
+        .body as FileDetails;
+      expect(participants.summary).toBe(owners.summary);
+      expect(participants.insights).toEqual(owners.insights);
+      expect(participants.insights).toEqual(fakeInsights);
+
+      const inList = await listed(participantToken, fileId);
+      expect(inList?.summary).toBe(owners.summary);
+      expect(inList?.insights).toEqual(owners.insights);
+    });
+
+    it('returns an action item without an assignee as null, not an invented name', async () => {
+      const fileId = await uploadRecording(ownerToken, meetingId, 'call.mp3');
+
+      const file = await settled(ownerToken, meetingId, fileId);
+      const unassigned = file.insights?.actionItems.filter((item) => item.assignee === null);
+      expect(unassigned).toHaveLength(1);
+      expect(unassigned?.[0]).toEqual({
+        description: expect.stringContaining('Fake speech') as string,
+        assignee: null,
+      });
+    });
+
+    it('gives a document a summary and insights: null', async () => {
+      const data = await readFile(path.join(FIXTURES, 'notes.txt'));
+      const fileId = await upload(ownerToken, meetingId, data, 'notes.txt');
+
+      const file = await settled(ownerToken, meetingId, fileId);
+      expect(file).toMatchObject({ status: 'READY', insights: null });
+      expect(file.summary).toEqual(expect.any(String));
+
+      const inList = await listed(participantToken, fileId);
+      expect(inList).toMatchObject({ status: 'READY', summary: file.summary, insights: null });
     });
   });
 
