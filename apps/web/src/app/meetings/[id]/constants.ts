@@ -137,6 +137,9 @@ export const TRANSCRIPT_FAILED_MESSAGE = 'Could not load the transcript. Please 
 export const RETRY_FAILED_MESSAGE = 'Could not start processing again. Please try again.';
 /** A `409` on retry: the file is not `FAILED` any more (e.g. retried from another tab). */
 export const RETRY_CONFLICT_MESSAGE = 'This file is already being processed again.';
+export const ANALYSIS_FAILED_MESSAGE = 'Could not start the analysis. Please try again.';
+/** A `409` on analyze: the recording is being analyzed already or has insights (e.g. another tab). */
+export const ANALYSIS_CONFLICT_MESSAGE = 'This recording is already analyzed or being analyzed.';
 
 /** How often the file list is reloaded while any file is `PROCESSING`. */
 export const PROCESSING_POLL_INTERVAL_MS = 3000;

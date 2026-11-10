@@ -25,6 +25,9 @@ export type MeetingFileKind = 'AUDIO' | 'VIDEO' | 'DOCUMENT' | 'IMAGE';
 
 export type RecordingStage = 'QUEUED' | 'PREPARING_AUDIO' | 'TRANSCRIBING' | 'SUMMARIZING';
 
+/** The manual analysis of a `READY` recording processed before the meeting insights. */
+export type AnalysisStatus = 'RUNNING' | 'FAILED';
+
 /** A task named in a meeting; `assignee` is `null` when nobody was named. */
 export type ActionItem = {
   description: string;
@@ -55,6 +58,16 @@ export type MeetingFile = {
   failureReason: string | null;
   /** How far a recording in `PROCESSING` has come, `null` for any other file. */
   processingStage: RecordingStage | null;
+  /**
+   * The manual analysis of a `READY` recording: `RUNNING`, `FAILED`, or `null` when none was
+   * started or it succeeded. The file stays `READY` meanwhile.
+   */
+  analysisStatus: AnalysisStatus | null;
+  /**
+   * Whether the analysis can be started: a `READY` recording with a transcript but no insights, and
+   * no analysis running. Only the owner may start it; the page checks the role.
+   */
+  canAnalyze: boolean;
   /** The API serves it inline (PDF, PNG, JPEG), so the page can preview it. */
   previewable: boolean;
   /** The API serves it inline with byte ranges (audio, video), so the page can play it. */
