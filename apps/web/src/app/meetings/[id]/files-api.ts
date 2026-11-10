@@ -158,7 +158,10 @@ export async function startAnalysis(file: MeetingFile): Promise<AnalysisResult> 
     if (response.status === 409) return { type: 'stale', message: ANALYSIS_CONFLICT_MESSAGE };
     if (response.status === 404) return { type: 'stale', message: FILE_GONE_MESSAGE };
     if (!response.ok) return { type: 'error', message: ANALYSIS_FAILED_MESSAGE };
-    return { type: 'started', file: (await response.json()) as MeetingFile };
+    // The answer is the details: drop the transcript, the list state never holds it.
+    const { transcript, ...started } = (await response.json()) as MeetingFileDetails;
+    void transcript;
+    return { type: 'started', file: started };
   } catch {
     return { type: 'error', message: SERVER_UNAVAILABLE_MESSAGE };
   }
