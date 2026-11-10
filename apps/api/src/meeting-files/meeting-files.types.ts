@@ -6,6 +6,7 @@ import type {
   TranscriptSegment,
 } from '../generated/prisma/client.js';
 import type {
+  AnalysisStatus,
   MeetingFileKind,
   MeetingFileStatus,
   RecordingStage,
@@ -27,6 +28,11 @@ export interface MeetingFileView {
   failureReason: string | null;
   /** How far a recording in `PROCESSING` has come; `null` for any other file. */
   processingStage: RecordingStage | null;
+  /**
+   * The manual analysis of a `READY` recording: `RUNNING`, `FAILED`, or `null` when none was
+   * started or it succeeded. The file stays `READY` meanwhile.
+   */
+  analysisStatus: AnalysisStatus | null;
   /**
    * Whether a link serves the file inline (`disposition=inline`) as a whole, so a page can preview
    * it (PDF, PNG, JPEG).
@@ -54,6 +60,7 @@ export const toMeetingFileView = (file: MeetingFile): MeetingFileView => ({
   failureReason: file.failureReason,
   processingStage:
     file.status === 'PROCESSING' && isRecording(file.kind) ? file.processingStage : null,
+  analysisStatus: file.analysisStatus,
   previewable: INLINE_MIME_TYPES.includes(file.mimeType),
   playable: PLAYABLE_MIME_TYPES.includes(file.mimeType),
   durationMs: file.durationMs,
@@ -85,6 +92,11 @@ export interface MeetingFileListItem extends MeetingFileView {
   summary: string | null;
   /** The action items and decisions once a recording is `READY`; `null` otherwise and for documents. */
   insights: RecordingInsightsView | null;
+  /**
+   * Whether the analysis can be started: a `READY` recording with a transcript but no insights,
+   * and no analysis running. Who may start it (the owner) is checked by the web and the route.
+   */
+  canAnalyze: boolean;
 }
 
 /** A file as the list and details read it, with its summary and insights. */
@@ -94,8 +106,18 @@ type FileWithResults = MeetingFile & {
     (RecordingInsights & { actionItems: ActionItem[]; decisions: MeetingDecision[] }) | null;
 };
 
-export const toMeetingFileListItem = (file: FileWithResults): MeetingFileListItem => ({
+/** `segmentCount`: how many transcript segments the file has (the list counts, it never loads them). */
+export const toMeetingFileListItem = (
+  file: FileWithResults,
+  segmentCount: number,
+): MeetingFileListItem => ({
   ...toMeetingFileView(file),
+  canAnalyze:
+    file.status === 'READY' &&
+    isRecording(file.kind) &&
+    segmentCount > 0 &&
+    !file.insights &&
+    file.analysisStatus !== 'RUNNING',
   summary: file.insights?.summary ?? file.summary?.text ?? null,
   insights: file.insights && {
     actionItems: file.insights.actionItems.map(({ description, assignee }) => ({
@@ -126,7 +148,7 @@ export interface MeetingFileDetails extends MeetingFileListItem {
 export const toMeetingFileDetails = (
   file: FileWithResults & { transcript: TranscriptSegment[] },
 ): MeetingFileDetails => ({
-  ...toMeetingFileListItem(file),
+  ...toMeetingFileListItem(file, file.transcript.length),
   // Segments are kept after a failed summary (for the retry), so READY decides.
   transcript:
     file.status === 'READY' && isRecording(file.kind) && file.transcript.length > 0

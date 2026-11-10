@@ -106,6 +106,14 @@ export function recordingJobExpirationSeconds(): number {
   return seconds;
 }
 
+/**
+ * pg-boss expiration of a manual analysis job: the analysis of the longest allowed recording plus
+ * a minute. Like for recordings, the analysis timeout fires first.
+ */
+export function analysisJobExpirationSeconds(): number {
+  return Math.ceil(transcriptSummaryTimeoutMs(maxRecordingMinutes() * 60 * 1000) / 1000) + 60;
+}
+
 const require = createRequire(import.meta.url);
 
 /** The ffmpeg binary: `FFMPEG_PATH`, else the one `ffmpeg-static` installed, else `PATH`. */

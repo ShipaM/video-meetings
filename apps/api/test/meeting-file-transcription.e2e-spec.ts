@@ -35,6 +35,8 @@ interface FileDetails {
   durationMs: number | null;
   summary: string | null;
   insights?: Insights | null;
+  analysisStatus?: 'RUNNING' | 'FAILED' | null;
+  canAnalyze?: boolean;
   transcript?: Segment[] | null;
 }
 
@@ -332,22 +334,22 @@ describe('Meeting file transcription (e2e)', () => {
     });
   });
 
-  describe('insights', () => {
-    /**
-     * The fake analyzer quotes the transcript: a summary, an action item with an assignee, one
-     * without (nobody was named), and a decision.
-     */
-    const fakeInsights: Insights = {
-      actionItems: [
-        {
-          description: expect.stringContaining('Fake speech') as string,
-          assignee: expect.stringMatching(/\S/) as string,
-        },
-        { description: expect.stringContaining('Fake speech') as string, assignee: null },
-      ],
-      decisions: [{ text: expect.stringContaining('Fake speech') as string }],
-    };
+  /**
+   * The fake analyzer quotes the transcript: a summary, an action item with an assignee, one
+   * without (nobody was named), and a decision.
+   */
+  const fakeInsights: Insights = {
+    actionItems: [
+      {
+        description: expect.stringContaining('Fake speech') as string,
+        assignee: expect.stringMatching(/\S/) as string,
+      },
+      { description: expect.stringContaining('Fake speech') as string, assignee: null },
+    ],
+    decisions: [{ text: expect.stringContaining('Fake speech') as string }],
+  };
 
+  describe('insights', () => {
     const listed = async (token: string, fileId: string) => {
       const res = await request(server())
         .get(`/meetings/${meetingId}/files`)
@@ -491,6 +493,248 @@ describe('Meeting file transcription (e2e)', () => {
         expect(await workDirExists(fileId)).toBe(false);
         await details(ownerToken, meetingId, fileId).expect(404);
       });
+    });
+  });
+
+  describe('manual analysis', () => {
+    const OLD_SUMMARY = 'Summary written before the meeting insights.';
+
+    const analyze = (token: string, meeting: string, fileId: string) =>
+      request(server()).post(`/meetings/${meeting}/files/${fileId}/analyze`).set(auth(token));
+
+    const listed = async (token: string, fileId: string) => {
+      const res = await request(server())
+        .get(`/meetings/${meetingId}/files`)
+        .set(auth(token))
+        .expect(200);
+      return (res.body as FileDetails[]).find((file) => file.id === fileId);
+    };
+
+    /**
+     * A recording processed before the meeting insights: READY with a transcript and an older
+     * `MeetingFileSummary`, but no `RecordingInsights`.
+     */
+    const olderRecording = async (): Promise<string> => {
+      const fileId = await uploadRecording(ownerToken, meetingId, 'call.mp3');
+      await settled(ownerToken, meetingId, fileId);
+      const prisma = app.get(PrismaService);
+      await prisma.recordingInsights.delete({ where: { fileId } });
+      await prisma.meetingFileSummary.create({ data: { fileId, text: OLD_SUMMARY } });
+      analyzer.control.reset();
+      return fileId;
+    };
+
+    it('both endpoints offer the analysis of an older recording only', async () => {
+      const older = await olderRecording();
+      const analyzed = await uploadRecording(ownerToken, meetingId, 'call.mp3');
+      await settled(ownerToken, meetingId, analyzed);
+
+      for (const token of [ownerToken, participantToken]) {
+        for (const [fileId, canAnalyze] of [
+          [older, true],
+          [analyzed, false],
+        ] as const) {
+          const file = (await details(token, meetingId, fileId).expect(200)).body as FileDetails;
+          expect(file).toMatchObject({ analysisStatus: null, canAnalyze });
+          expect(await listed(token, fileId)).toMatchObject({ analysisStatus: null, canAnalyze });
+        }
+      }
+    });
+
+    it('answers 202 to the owner while the file stays READY with its transcript and old summary', async () => {
+      const fileId = await olderRecording();
+      const release = analyzer.control.hold();
+
+      const res = await analyze(ownerToken, meetingId, fileId).expect(202);
+      expect(res.body).toMatchObject({ id: fileId, status: 'READY', analysisStatus: 'RUNNING' });
+      await analyzer.control.started();
+
+      // Both endpoints report the running analysis, for the owner and a participant (a reload).
+      for (const token of [ownerToken, participantToken]) {
+        const file = (await details(token, meetingId, fileId).expect(200)).body as FileDetails;
+        expect(file).toMatchObject({
+          status: 'READY',
+          failureReason: null,
+          processingStage: null,
+          analysisStatus: 'RUNNING',
+          summary: OLD_SUMMARY,
+          insights: null,
+        });
+        expect(file.transcript).toHaveLength(3);
+        expect(await listed(token, fileId)).toMatchObject({
+          status: 'READY',
+          analysisStatus: 'RUNNING',
+          summary: OLD_SUMMARY,
+          insights: null,
+        });
+      }
+
+      // A repeated request does not start a second analysis.
+      await analyze(ownerToken, meetingId, fileId).expect(409);
+
+      release();
+      await analyzer.control.finished();
+      expect(analyzer.control.calls).toBe(1);
+    });
+
+    it('answers 403 to a participant and starts nothing', async () => {
+      const fileId = await olderRecording();
+
+      await analyze(participantToken, meetingId, fileId).expect(403);
+
+      const file = (await details(ownerToken, meetingId, fileId).expect(200)).body as FileDetails;
+      expect(file).toMatchObject({ status: 'READY', analysisStatus: null, summary: OLD_SUMMARY });
+      expect(analyzer.control.calls).toBe(0);
+    });
+
+    it('answers 404 for a stranger, a file of another meeting and a missing file', async () => {
+      const fileId = await olderRecording();
+      const other = await request(server())
+        .post('/meetings')
+        .set(auth(ownerToken))
+        .send({ title: 'Other', startsAt: '2030-01-02T10:00:00.000Z' })
+        .expect(201);
+      const otherMeetingId = (other.body as { id: string }).id;
+
+      await analyze(strangerToken, meetingId, fileId).expect(404);
+      await analyze(ownerToken, otherMeetingId, fileId).expect(404);
+      await analyze(ownerToken, meetingId, '00000000-0000-4000-8000-000000000000').expect(404);
+      expect(analyzer.control.calls).toBe(0);
+    });
+
+    it('answers 409 for a recording that already has insights', async () => {
+      const fileId = await uploadRecording(ownerToken, meetingId, 'call.mp3');
+      await settled(ownerToken, meetingId, fileId);
+      analyzer.control.reset();
+
+      await analyze(ownerToken, meetingId, fileId).expect(409);
+      expect(analyzer.control.calls).toBe(0);
+    });
+
+    it('answers 409 for a recording without a transcript and for a document', async () => {
+      const fileId = await olderRecording();
+      await app.get(PrismaService).transcriptSegment.deleteMany({ where: { fileId } });
+      await analyze(ownerToken, meetingId, fileId).expect(409);
+
+      const data = await readFile(path.join(FIXTURES, 'notes.txt'));
+      const documentId = await upload(ownerToken, meetingId, data, 'notes.txt');
+      await settled(ownerToken, meetingId, documentId);
+      await analyze(ownerToken, meetingId, documentId).expect(409);
+
+      const file = (await details(ownerToken, meetingId, fileId).expect(200)).body as FileDetails;
+      expect(file).toMatchObject({ status: 'READY', analysisStatus: null, summary: OLD_SUMMARY });
+    });
+
+    /** Polls the file details until its analysis is no longer RUNNING. */
+    const analysisSettled = async (fileId: string) => {
+      const deadline = Date.now() + 20_000;
+      for (;;) {
+        const file = (await details(ownerToken, meetingId, fileId).expect(200)).body as FileDetails;
+        if (file.analysisStatus !== 'RUNNING') {
+          return file;
+        }
+        if (Date.now() > deadline) {
+          throw new Error(`The analysis of ${fileId} is still RUNNING`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+    };
+
+    const oldSummaryCount = (fileId: string) =>
+      app.get(PrismaService).meetingFileSummary.count({ where: { fileId } });
+
+    it('stores the insights, removes the old summary and clears the status', async () => {
+      const fileId = await olderRecording();
+
+      await analyze(ownerToken, meetingId, fileId).expect(202);
+      const file = await analysisSettled(fileId);
+
+      expect(file).toMatchObject({
+        status: 'READY',
+        failureReason: null,
+        analysisStatus: null,
+        canAnalyze: false,
+        insights: fakeInsights,
+      });
+      expect(file.summary).toContain('Fake speech 1. Fake speech 2. Fake speech 3.');
+      expect(file.transcript).toHaveLength(3);
+      expect(await oldSummaryCount(fileId)).toBe(0);
+      expect(await listed(participantToken, fileId)).toMatchObject({
+        status: 'READY',
+        analysisStatus: null,
+        canAnalyze: false,
+        insights: fakeInsights,
+      });
+      expect(analyzer.control.calls).toBe(1);
+    });
+
+    it('a failure sets FAILED and keeps the transcript and the old summary; it can be started again', async () => {
+      const fileId = await olderRecording();
+      analyzer.control.behave('fail');
+
+      await analyze(ownerToken, meetingId, fileId).expect(202);
+      const failed = await analysisSettled(fileId);
+      expect(failed).toMatchObject({
+        status: 'READY',
+        failureReason: null,
+        analysisStatus: 'FAILED',
+        canAnalyze: true,
+        summary: OLD_SUMMARY,
+        insights: null,
+      });
+      expect(failed.transcript).toHaveLength(3);
+      expect(await oldSummaryCount(fileId)).toBe(1);
+      expect(await listed(participantToken, fileId)).toMatchObject({
+        analysisStatus: 'FAILED',
+        summary: OLD_SUMMARY,
+      });
+
+      // Starting again succeeds this time.
+      analyzer.control.reset();
+      const res = await analyze(ownerToken, meetingId, fileId).expect(202);
+      expect(res.body).toMatchObject({ status: 'READY', analysisStatus: 'RUNNING' });
+      const file = await analysisSettled(fileId);
+      expect(file).toMatchObject({ status: 'READY', analysisStatus: null, insights: fakeInsights });
+      expect(await oldSummaryCount(fileId)).toBe(0);
+      expect(analyzer.control.calls).toBe(1);
+    });
+
+    it('a hanging analyzer times out into FAILED', async () => {
+      const fileId = await olderRecording();
+      analyzer.control.behave('hang');
+
+      await analyze(ownerToken, meetingId, fileId).expect(202);
+      // Times out after DOCUMENT_PROCESSING_TIMEOUT_SECONDS (3 s in the e2e config) per started hour.
+      const file = await analysisSettled(fileId);
+      expect(file).toMatchObject({
+        status: 'READY',
+        analysisStatus: 'FAILED',
+        summary: OLD_SUMMARY,
+        insights: null,
+      });
+    });
+
+    it('deleting during the analysis brings back neither the file nor its insights', async () => {
+      const fileId = await olderRecording();
+      const release = analyzer.control.hold();
+      await analyze(ownerToken, meetingId, fileId).expect(202);
+      await analyzer.control.started();
+
+      await request(server())
+        .delete(`/meetings/${meetingId}/files/${fileId}`)
+        .set(auth(ownerToken))
+        .expect(204);
+
+      // The analysis finishes after the file is gone.
+      release();
+      await analyzer.control.finished();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      const prisma = app.get(PrismaService);
+      expect(await prisma.meetingFile.findUnique({ where: { id: fileId } })).toBeNull();
+      expect(await prisma.recordingInsights.findUnique({ where: { fileId } })).toBeNull();
+      expect(await oldSummaryCount(fileId)).toBe(0);
+      await details(ownerToken, meetingId, fileId).expect(404);
     });
   });
 

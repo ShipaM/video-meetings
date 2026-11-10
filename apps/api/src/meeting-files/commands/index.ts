@@ -1,3 +1,4 @@
+import { AnalyzeRecordingHandler } from './handlers/analyze-recording.handler.js';
 import { AuthorizeUploadRequestHandler } from './handlers/authorize-upload-request.handler.js';
 import { CancelUploadHandler } from './handlers/cancel-upload.handler.js';
 import { CleanupAbandonedUploadsHandler } from './handlers/cleanup-abandoned-uploads.handler.js';
@@ -8,8 +9,10 @@ import { FailStuckProcessingHandler } from './handlers/fail-stuck-processing.han
 import { ProcessDocumentHandler } from './handlers/process-document.handler.js';
 import { ProcessRecordingHandler } from './handlers/process-recording.handler.js';
 import { RetryFileProcessingHandler } from './handlers/retry-file-processing.handler.js';
+import { StartAnalysisHandler } from './handlers/start-analysis.handler.js';
 import { SweepOrphanFilesHandler } from './handlers/sweep-orphan-files.handler.js';
 
+export { AnalyzeRecordingCommand } from './analyze-recording.command.js';
 export { AuthorizeUploadRequestCommand } from './authorize-upload-request.command.js';
 export { CancelUploadCommand } from './cancel-upload.command.js';
 export { CleanupAbandonedUploadsCommand } from './cleanup-abandoned-uploads.command.js';
@@ -20,6 +23,7 @@ export { FailStuckProcessingCommand } from './fail-stuck-processing.command.js';
 export { ProcessDocumentCommand } from './process-document.command.js';
 export { ProcessRecordingCommand } from './process-recording.command.js';
 export { RetryFileProcessingCommand } from './retry-file-processing.command.js';
+export { StartAnalysisCommand } from './start-analysis.command.js';
 export { SweepOrphanFilesCommand } from './sweep-orphan-files.command.js';
 
 export const CommandHandlers = [
@@ -33,5 +37,7 @@ export const CommandHandlers = [
   ProcessDocumentHandler,
   ProcessRecordingHandler,
   RetryFileProcessingHandler,
+  StartAnalysisHandler,
+  AnalyzeRecordingHandler,
   FailStuckProcessingHandler,
 ];
