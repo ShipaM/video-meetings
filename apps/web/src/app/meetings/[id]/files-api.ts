@@ -3,6 +3,8 @@ import { API_URL, SERVER_UNAVAILABLE_MESSAGE } from '../../constants';
 import type { MeetingFile, MeetingFileDetails, TranscriptSegment } from '../../meetings';
 import type { RemovalResult } from './use-confirmed-removal';
 import {
+  ANALYSIS_CONFLICT_MESSAGE,
+  ANALYSIS_FAILED_MESSAGE,
   DELETE_FAILED_MESSAGE,
   DOWNLOAD_FAILED_MESSAGE,
   FILE_GONE_MESSAGE,
@@ -131,6 +133,35 @@ export async function retryProcessing(file: MeetingFile): Promise<RetryResult> {
     if (response.status === 404) return { type: 'stale', message: FILE_GONE_MESSAGE };
     if (!response.ok) return { type: 'error', message: RETRY_FAILED_MESSAGE };
     return { type: 'retried', file: (await response.json()) as MeetingFile };
+  } catch {
+    return { type: 'error', message: SERVER_UNAVAILABLE_MESSAGE };
+  }
+}
+
+export type AnalysisResult =
+  | { type: 'started'; file: MeetingFile }
+  /** The file changed meanwhile (`409`) or is gone (`404`): the list should be reloaded. */
+  | { type: 'stale'; message: string }
+  | { type: 'error'; message: string }
+  | { type: 'unauthorized' };
+
+/**
+ * Starts the analysis of a `READY` recording without insights (owner only); on success the file
+ * stays `READY` with `analysisStatus` `RUNNING`.
+ */
+export async function startAnalysis(file: MeetingFile): Promise<AnalysisResult> {
+  try {
+    const response = await authorizedFetch(`/meetings/${file.meetingId}/files/${file.id}/analyze`, {
+      method: 'POST',
+    });
+    if (!response) return { type: 'unauthorized' };
+    if (response.status === 409) return { type: 'stale', message: ANALYSIS_CONFLICT_MESSAGE };
+    if (response.status === 404) return { type: 'stale', message: FILE_GONE_MESSAGE };
+    if (!response.ok) return { type: 'error', message: ANALYSIS_FAILED_MESSAGE };
+    // The answer is the details: drop the transcript, the list state never holds it.
+    const { transcript, ...started } = (await response.json()) as MeetingFileDetails;
+    void transcript;
+    return { type: 'started', file: started };
   } catch {
     return { type: 'error', message: SERVER_UNAVAILABLE_MESSAGE };
   }

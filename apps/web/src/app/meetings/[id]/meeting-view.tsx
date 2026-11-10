@@ -66,10 +66,10 @@ async function fetchFiles(meetingId: string): Promise<FilesResult> {
 }
 
 /**
- * Reloads the file list every few seconds while `isActive` (a file is `PROCESSING`), so statuses
- * and summaries appear without a manual reload. One request at a time, the next one an interval
- * after the previous answer. A hidden tab has no timer at all; it reloads at once when it becomes
- * visible again, and that reload replaces the pending one.
+ * Reloads the file list every few seconds while `isActive` (a file is `PROCESSING` or being
+ * analyzed), so statuses and summaries appear without a manual reload. One request at a time, the
+ * next one an interval after the previous answer. A hidden tab has no timer at all; it reloads at
+ * once when it becomes visible again, and that reload replaces the pending one.
  */
 function useProcessingPolling(isActive: boolean, refresh: () => Promise<void>) {
   useEffect(() => {
@@ -184,17 +184,17 @@ function MeetingContent({ meetingId }: { meetingId: string }) {
   );
 
   /**
-   * Shows a retried file as `PROCESSING` at once (polling starts), then reloads the list so no
-   * refresh started before the retry brings back `FAILED`. Without a file only reloads.
+   * Shows a retried or analyzing file at once (polling starts), then reloads the list so no
+   * refresh started before the request brings back the old state. Without a file only reloads.
    */
-  const applyRetry = useCallback(
-    (retried?: MeetingFile) => {
-      if (retried) {
+  const applyStarted = useCallback(
+    (started?: MeetingFile) => {
+      if (started) {
         setState((current) =>
           current.type === 'ready'
             ? {
                 ...current,
-                files: current.files.map((file) => (file.id === retried.id ? retried : file)),
+                files: current.files.map((file) => (file.id === started.id ? started : file)),
               }
             : current,
         );
@@ -205,14 +205,18 @@ function MeetingContent({ meetingId }: { meetingId: string }) {
   );
 
   const isProcessing =
-    state.type === 'ready' && state.files.some((file) => file.status === 'PROCESSING');
+    state.type === 'ready' &&
+    state.files.some((file) => file.status === 'PROCESSING' || file.analysisStatus === 'RUNNING');
   useProcessingPolling(isProcessing, refresh);
 
-  // Participants get a read-only page: no upload, retry, delete or participant management.
+  // Participants get a read-only page: no upload, retry, analysis, delete or participant management.
   const isOwner = state.type === 'ready' && state.meeting.role === 'owner';
   const fileActions = useMemo(
-    () => (isOwner ? { onDeleted: removeFile, onRetried: applyRetry } : undefined),
-    [isOwner, removeFile, applyRetry],
+    () =>
+      isOwner
+        ? { onDeleted: removeFile, onRetried: applyStarted, onAnalysisStarted: applyStarted }
+        : undefined,
+    [isOwner, removeFile, applyStarted],
   );
 
   return (

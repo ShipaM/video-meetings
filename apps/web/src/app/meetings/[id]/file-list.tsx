@@ -10,6 +10,12 @@ import {
   type MeetingFile,
 } from '../../meetings';
 import {
+  ANALYSIS_FAILED_ANNOUNCEMENT,
+  ANALYSIS_FAILED_TEXT,
+  ANALYSIS_READY_ANNOUNCEMENT,
+  ANALYSIS_RESTART_OWNER_TEXT,
+  ANALYSIS_RESTART_PARTICIPANT_TEXT,
+  ANALYSIS_RUNNING_TEXT,
   ANNOUNCEMENT_RESET_MS,
   FILE_KIND_LABEL,
   FILE_STATUS,
@@ -20,7 +26,7 @@ import {
 } from './constants';
 import { FilePreviewPanel, FileSummary, ImageThumbnail, useFileLink } from './file-preview';
 import { getExtension } from './file-types';
-import { deleteFile, downloadFile, retryProcessing } from './files-api';
+import { deleteFile, downloadFile, retryProcessing, startAnalysis } from './files-api';
 import { RecordingInsights } from './recording-insights';
 import { RecordingPanel } from './recording-player';
 import { UnmountListener } from './unmount-listener';
@@ -115,6 +121,8 @@ export type FileActions = {
   onDeleted: (fileId: string) => void;
   /** Called after Retry: with the file now `PROCESSING`, or without one to reload the list. */
   onRetried: (file?: MeetingFile) => void;
+  /** Called after Analyze meeting: with the file now analyzing, or without one to reload the list. */
+  onAnalysisStarted: (file?: MeetingFile) => void;
 };
 
 const actionButtonClass = 'min-h-11 flex-1 sm:min-h-10 sm:flex-none';
@@ -122,6 +130,7 @@ const actionButtonClass = 'min-h-11 flex-1 sm:min-h-10 sm:flex-none';
 function FileRow({ file, actions }: { file: MeetingFile; actions?: FileActions }) {
   const [isPending, setIsPending] = useState(false);
   const [isRetrying, setIsRetrying] = useState(false);
+  const [isStartingAnalysis, setIsStartingAnalysis] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [isPlayerOpen, setIsPlayerOpen] = useState(false);
@@ -171,6 +180,28 @@ function FileRow({ file, actions }: { file: MeetingFile; actions?: FileActions }
     } else {
       setError(result.message);
       if (result.type === 'stale') actions.onRetried();
+    }
+  }
+
+  async function handleAnalyze() {
+    if (!actions) return;
+    setIsStartingAnalysis(true);
+    setError(null);
+    const result = await startAnalysis(file);
+    setIsStartingAnalysis(false);
+    if (result.type === 'unauthorized') {
+      clearAccessToken();
+    } else if (result.type === 'error') {
+      setError(result.message);
+    } else {
+      if (result.type === 'started') {
+        actions.onAnalysisStarted(result.file);
+      } else {
+        setError(result.message);
+        actions.onAnalysisStarted();
+      }
+      // The action goes away with the reloaded state: keep keyboard focus in the row.
+      requestAnimationFrame(() => downloadButton.current?.focus());
     }
   }
 
@@ -248,6 +279,17 @@ function FileRow({ file, actions }: { file: MeetingFile; actions?: FileActions }
               Retry
             </Button>
           )}
+          {actions && file.canAnalyze && (
+            <Button
+              variant="secondary"
+              className={actionButtonClass}
+              aria-label={`Analyze meeting ${file.originalName}`}
+              isPending={isStartingAnalysis}
+              onPress={handleAnalyze}
+            >
+              Analyze meeting
+            </Button>
+          )}
           <Button
             ref={downloadButton}
             variant="secondary"
@@ -276,6 +318,18 @@ function FileRow({ file, actions }: { file: MeetingFile; actions?: FileActions }
           {!actions && ' Only the owner can retry it.'}
         </p>
       )}
+      {file.status === 'READY' && file.analysisStatus === 'RUNNING' && (
+        <p className="text-muted flex items-center gap-2 text-sm">
+          <Spinner size="sm" color="current" />
+          {ANALYSIS_RUNNING_TEXT}
+        </p>
+      )}
+      {file.status === 'READY' && file.analysisStatus === 'FAILED' && (
+        <p className="text-danger text-sm">
+          {ANALYSIS_FAILED_TEXT}{' '}
+          {actions ? ANALYSIS_RESTART_OWNER_TEXT : ANALYSIS_RESTART_PARTICIPANT_TEXT}
+        </p>
+      )}
       {error !== null && (
         <p role="alert" className="text-danger text-sm">
           {error}
@@ -293,12 +347,13 @@ function FileRow({ file, actions }: { file: MeetingFile; actions?: FileActions }
 }
 
 /**
- * Announces files that finished processing (one polite, atomic message), without moving focus.
+ * Announces files that finished processing or an analysis (one polite, atomic message), without
+ * moving focus.
  * The region is emptied before each message, so a repeated one (a retry that failed again) is
  * read out too.
  */
 function useProcessingAnnouncement(files: MeetingFile[]): string {
-  const previous = useRef<Map<string, MeetingFile['status']> | null>(null);
+  const previous = useRef<Map<string, Pick<MeetingFile, 'status' | 'analysisStatus'>> | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const [message, setMessage] = useState('');
 
@@ -306,19 +361,27 @@ function useProcessingAnnouncement(files: MeetingFile[]): string {
 
   useEffect(() => {
     const before = previous.current;
-    previous.current = new Map(files.map((file) => [file.id, file.status]));
-    if (!before) return; // the first load announces nothing
-    const finished = files.filter(
-      (file) => before.get(file.id) === 'PROCESSING' && file.status !== 'PROCESSING',
+    previous.current = new Map(
+      files.map((file) => [file.id, { status: file.status, analysisStatus: file.analysisStatus }]),
     );
-    if (finished.length === 0) return;
-    const text = finished
-      .map((file) =>
-        file.status === 'FAILED'
-          ? `${file.originalName}: processing failed.`
-          : `${file.originalName} is ready.`,
-      )
-      .join(' ');
+    if (!before) return; // the first load announces nothing
+    const messages = files.flatMap((file) => {
+      const old = before.get(file.id);
+      if (old?.status === 'PROCESSING' && file.status !== 'PROCESSING') {
+        return file.status === 'FAILED'
+          ? [`${file.originalName}: processing failed.`]
+          : [`${file.originalName} is ready.`];
+      }
+      if (old?.analysisStatus === 'RUNNING' && file.analysisStatus === 'FAILED') {
+        return [`${file.originalName}: ${ANALYSIS_FAILED_ANNOUNCEMENT}`];
+      }
+      if (old?.analysisStatus === 'RUNNING' && file.analysisStatus === null && file.insights) {
+        return [`${file.originalName}: ${ANALYSIS_READY_ANNOUNCEMENT}`];
+      }
+      return [];
+    });
+    if (messages.length === 0) return;
+    const text = messages.join(' ');
     setMessage('');
     clearTimeout(timer.current);
     timer.current = setTimeout(() => setMessage(text), ANNOUNCEMENT_RESET_MS);
@@ -332,7 +395,7 @@ export function FileList({
   actions,
 }: {
   files: MeetingFile[];
-  /** Omitted for a read-only (participant) view: Retry and the delete buttons are hidden. */
+  /** Omitted for a read-only (participant) view: Retry, Analyze meeting and delete are hidden. */
   actions?: FileActions;
 }) {
   const announcement = useProcessingAnnouncement(files);

@@ -137,8 +137,21 @@ export const TRANSCRIPT_FAILED_MESSAGE = 'Could not load the transcript. Please 
 export const RETRY_FAILED_MESSAGE = 'Could not start processing again. Please try again.';
 /** A `409` on retry: the file is not `FAILED` any more (e.g. retried from another tab). */
 export const RETRY_CONFLICT_MESSAGE = 'This file is already being processed again.';
+export const ANALYSIS_FAILED_MESSAGE = 'Could not start the analysis. Please try again.';
+/** A `409` on analyze: the recording is being analyzed already or has insights (e.g. another tab). */
+export const ANALYSIS_CONFLICT_MESSAGE = 'This recording is already analyzed or being analyzed.';
+/** The state of a manual analysis, shown under a `READY` recording to everyone. */
+export const ANALYSIS_RUNNING_TEXT =
+  'Analyzing the meeting for action items and decisions. The status updates by itself.';
+export const ANALYSIS_FAILED_TEXT =
+  'The meeting analysis failed. The transcript and summary are unchanged.';
+export const ANALYSIS_RESTART_OWNER_TEXT = 'You can start it again.';
+export const ANALYSIS_RESTART_PARTICIPANT_TEXT = 'Only the owner can start it again.';
+/** Announced when an analysis ends, after the file name. */
+export const ANALYSIS_READY_ANNOUNCEMENT = 'the analysis is ready.';
+export const ANALYSIS_FAILED_ANNOUNCEMENT = 'the analysis failed.';
 
-/** How often the file list is reloaded while any file is `PROCESSING`. */
+/** How often the file list is reloaded while any file is `PROCESSING` or being analyzed. */
 export const PROCESSING_POLL_INTERVAL_MS = 3000;
 
 /**
