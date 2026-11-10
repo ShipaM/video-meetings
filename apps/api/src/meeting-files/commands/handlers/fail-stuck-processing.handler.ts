@@ -36,6 +36,36 @@ export class FailStuckProcessingHandler implements ICommandHandler<FailStuckProc
     if (failed > 0) {
       this.logger.warn(`Failed ${failed} file(s) left PROCESSING without a job`);
     }
+    return failed + (await this.failStuckAnalyses(cutoff));
+  }
+
+  /** Sets `FAILED` on `RUNNING` analyses (unchanged since `cutoff`) whose job is gone. */
+  private async failStuckAnalyses(cutoff: Date): Promise<number> {
+    // The cutoff stays in the condition: an analysis started again meanwhile is newer than it.
+    const stuck = {
+      status: 'READY',
+      analysisStatus: 'RUNNING',
+      updatedAt: { lt: cutoff },
+    } as const;
+    const candidates = await this.prisma.meetingFile.findMany({
+      where: stuck,
+      select: { id: true },
+    });
+
+    let failed = 0;
+    for (const { id } of candidates) {
+      if (await this.processing.hasLiveAnalysisJob(id)) {
+        continue;
+      }
+      const { count } = await this.prisma.meetingFile.updateMany({
+        where: { id, ...stuck },
+        data: { analysisStatus: 'FAILED' },
+      });
+      failed += count;
+    }
+    if (failed > 0) {
+      this.logger.warn(`Failed ${failed} analysis(es) left RUNNING without a job`);
+    }
     return failed;
   }
 }

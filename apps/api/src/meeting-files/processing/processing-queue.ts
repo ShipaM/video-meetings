@@ -156,9 +156,22 @@ export class ProcessingQueue implements OnApplicationBootstrap {
    * the queue of its kind.
    */
   async hasLiveJob(kind: MeetingFileKind, fileId: string, attempt: number): Promise<boolean> {
-    const jobs = await this.jobs.boss.findJobs<ProcessFileJob>(queueOf(kind), {
-      data: { fileId, attempt },
-    });
-    return jobs.some((job) => LIVE_STATES.has(job.state));
+    const job: ProcessFileJob = { fileId, attempt };
+    return this.hasLiveJobIn(queueOf(kind), job);
+  }
+
+  /**
+   * Whether a manual analysis job of the recording is still queued, running or waiting for a retry.
+   * At most one analysis runs at a time, so any live job of the file is the current one.
+   */
+  async hasLiveAnalysisJob(fileId: string): Promise<boolean> {
+    const job: AnalyzeRecordingJob = { fileId };
+    return this.hasLiveJobIn(ANALYZE_RECORDING_QUEUE, job);
+  }
+
+  /** Whether `queue` holds a live job whose data contains `jobData` (pg-boss `findJobs` by data). */
+  private async hasLiveJobIn(queue: string, jobData: object): Promise<boolean> {
+    const jobs = await this.jobs.boss.findJobs(queue, { data: jobData });
+    return jobs.some((found) => LIVE_STATES.has(found.state));
   }
 }
