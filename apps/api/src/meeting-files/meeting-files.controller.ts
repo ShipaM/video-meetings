@@ -17,7 +17,11 @@ import { CommandBus, QueryBus } from '@nestjs/cqrs';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import type { AuthenticatedRequest } from '../auth/jwt-auth.guard.js';
-import { DeleteMeetingFileCommand, RetryFileProcessingCommand } from './commands/index.js';
+import {
+  DeleteMeetingFileCommand,
+  RetryFileProcessingCommand,
+  StartAnalysisCommand,
+} from './commands/index.js';
 import { INLINE_MIME_TYPES, PLAYABLE_MIME_TYPES } from './meeting-files.config.js';
 import type { FileLink, MeetingFileDetails, MeetingFileListItem } from './meeting-files.types.js';
 import {
@@ -63,6 +67,18 @@ export class MeetingFilesController {
     @Param('fileId', ParseUUIDPipe) fileId: string,
   ): Promise<MeetingFileDetails> {
     return this.commandBus.execute(new RetryFileProcessingCommand(user.id, meetingId, fileId));
+  }
+
+  /** Starts the analysis of an older recording: `202`, the file stays `READY` while it runs. */
+  @Post('meetings/:id/files/:fileId/analyze')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.ACCEPTED)
+  analyze(
+    @Req() { user }: AuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) meetingId: string,
+    @Param('fileId', ParseUUIDPipe) fileId: string,
+  ): Promise<MeetingFileDetails> {
+    return this.commandBus.execute(new StartAnalysisCommand(user.id, meetingId, fileId));
   }
 
   @Post('meetings/:id/files/:fileId/link')

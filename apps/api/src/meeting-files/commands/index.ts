@@ -8,6 +8,7 @@ import { FailStuckProcessingHandler } from './handlers/fail-stuck-processing.han
 import { ProcessDocumentHandler } from './handlers/process-document.handler.js';
 import { ProcessRecordingHandler } from './handlers/process-recording.handler.js';
 import { RetryFileProcessingHandler } from './handlers/retry-file-processing.handler.js';
+import { StartAnalysisHandler } from './handlers/start-analysis.handler.js';
 import { SweepOrphanFilesHandler } from './handlers/sweep-orphan-files.handler.js';
 
 export { AuthorizeUploadRequestCommand } from './authorize-upload-request.command.js';
@@ -20,6 +21,7 @@ export { FailStuckProcessingCommand } from './fail-stuck-processing.command.js';
 export { ProcessDocumentCommand } from './process-document.command.js';
 export { ProcessRecordingCommand } from './process-recording.command.js';
 export { RetryFileProcessingCommand } from './retry-file-processing.command.js';
+export { StartAnalysisCommand } from './start-analysis.command.js';
 export { SweepOrphanFilesCommand } from './sweep-orphan-files.command.js';
 
 export const CommandHandlers = [
@@ -33,5 +35,6 @@ export const CommandHandlers = [
   ProcessDocumentHandler,
   ProcessRecordingHandler,
   RetryFileProcessingHandler,
+  StartAnalysisHandler,
   FailStuckProcessingHandler,
 ];

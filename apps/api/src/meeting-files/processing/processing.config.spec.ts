@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
+  analysisJobExpirationSeconds,
   recordingJobExpirationSeconds,
   transcriptSummaryTimeoutMs,
   transcriptionTimeoutMs,
@@ -46,6 +47,11 @@ describe('recording timeouts', () => {
     vi.stubEnv('MAX_RECORDING_MINUTES', '900');
 
     expect(() => recordingJobExpirationSeconds()).toThrow(/MAX_RECORDING_MINUTES=900/);
+  });
+
+  it('covers the analysis of the longest recording in the analysis job expiration', () => {
+    // 180 min: 3 x 15 min summary + 1 min.
+    expect(analysisJobExpirationSeconds()).toBe(45 * 60 + 60);
   });
 });
 

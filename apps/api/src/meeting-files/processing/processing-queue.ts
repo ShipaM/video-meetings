@@ -8,10 +8,15 @@ import { JobsService } from '../../jobs/jobs.service.js';
 import { RECORDING_KINDS, isRecording } from '../file-types.js';
 import { ProcessDocumentCommand } from '../commands/process-document.command.js';
 import { ProcessRecordingCommand } from '../commands/process-recording.command.js';
-import { documentJobTimeoutMs, recordingJobExpirationSeconds } from './processing.config.js';
+import {
+  analysisJobExpirationSeconds,
+  documentJobTimeoutMs,
+  recordingJobExpirationSeconds,
+} from './processing.config.js';
 
 export const PROCESS_DOCUMENT_QUEUE = 'process-document';
 export const PROCESS_RECORDING_QUEUE = 'process-recording';
+export const ANALYZE_RECORDING_QUEUE = 'analyze-recording';
 
 /** Kinds that are processed in the background; any other kind is `READY` once uploaded. */
 export const PROCESSED_KINDS: readonly MeetingFileKind[] = ['DOCUMENT', ...RECORDING_KINDS];
@@ -20,6 +25,11 @@ export const PROCESSED_KINDS: readonly MeetingFileKind[] = ['DOCUMENT', ...RECOR
 export interface ProcessFileJob {
   fileId: string;
   attempt: number;
+}
+
+/** Payload of a manual analysis job: the recording to analyze. */
+export interface AnalyzeRecordingJob {
+  fileId: string;
 }
 
 /** Job states in which a job will still run (or is running). */
@@ -42,11 +52,13 @@ const transactionDb = (tx: Prisma.TransactionClient): Db => ({
 });
 
 /**
- * The processing queues: `process-document` (summaries) and `process-recording` (transcripts and
- * summaries). `queue` adds a job inside the transaction that sets the file to `PROCESSING`, the
- * workers hand each job to its command. The handlers end every expected failure in `FAILED`
- * themselves, so pg-boss retries only a job that was interrupted (shutdown, crash, expiration); a
- * newer attempt or a deleted file turns a stale job into a no-op.
+ * The processing queues: `process-document` (summaries), `process-recording` (transcripts and
+ * summaries) and `analyze-recording` (the manual analysis of a `READY` recording). `queue` adds a
+ * job inside the transaction that sets the file to `PROCESSING`, `queueAnalysis` inside the one
+ * that sets its `analysisStatus` to `RUNNING`; the workers hand each job to its command. The
+ * handlers end every expected failure in `FAILED` themselves, so pg-boss retries only a job that
+ * was interrupted (shutdown, crash, expiration); a newer attempt or a deleted file turns a stale
+ * job into a no-op.
  */
 @Injectable()
 export class ProcessingQueue implements OnApplicationBootstrap {
@@ -66,6 +78,11 @@ export class ProcessingQueue implements OnApplicationBootstrap {
     });
     await boss.createQueue(PROCESS_RECORDING_QUEUE, {
       expireInSeconds: recordingJobExpirationSeconds(),
+      retryLimit: 2,
+      retryDelay: 30,
+    });
+    await boss.createQueue(ANALYZE_RECORDING_QUEUE, {
+      expireInSeconds: analysisJobExpirationSeconds(),
       retryLimit: 2,
       retryDelay: 30,
     });
@@ -110,6 +127,19 @@ export class ProcessingQueue implements OnApplicationBootstrap {
       ...(queue === PROCESS_RECORDING_QUEUE && {
         expireInSeconds: recordingJobExpirationSeconds(),
       }),
+    });
+  }
+
+  /**
+   * Adds the manual analysis job of a recording within `tx`, the transaction that sets its
+   * `analysisStatus` to `RUNNING`: both commit, or neither does.
+   */
+  async queueAnalysis(tx: Prisma.TransactionClient, fileId: string): Promise<void> {
+    const job: AnalyzeRecordingJob = { fileId };
+    await this.jobs.boss.send(ANALYZE_RECORDING_QUEUE, job, {
+      db: transactionDb(tx),
+      // From the limits at the time of sending, like recording jobs.
+      expireInSeconds: analysisJobExpirationSeconds(),
     });
   }
 
