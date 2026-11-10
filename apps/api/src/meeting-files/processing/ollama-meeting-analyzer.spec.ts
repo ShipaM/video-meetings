@@ -168,6 +168,32 @@ describe('OllamaMeetingAnalyzer', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it.each([
+    ['an error status', () => Promise.resolve(answer('{}', 500))],
+    ['an answer that is not JSON', () => Promise.resolve(answer('not json'))],
+    ['an empty summary', () => Promise.resolve(insights(''))],
+    ['an unreachable Ollama', () => Promise.reject(new TypeError('fetch failed'))],
+  ])('rejects with SummaryError when only the second part gets %s', async (_, response) => {
+    fetchMock.mockResolvedValueOnce(insights('- part 1')).mockImplementationOnce(response);
+
+    await expect(
+      new OllamaMeetingAnalyzer(settings).analyze(longTranscript, signal),
+    ).rejects.toThrow(SummaryError);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects with SummaryError when combining the part summaries gives an empty summary', async () => {
+    fetchMock
+      .mockResolvedValueOnce(insights('- part 1'))
+      .mockResolvedValueOnce(insights('- part 2'))
+      .mockResolvedValueOnce(insights('- part 3'))
+      .mockResolvedValueOnce(json({ summary: ' ' }));
+
+    await expect(
+      new OllamaMeetingAnalyzer(settings).analyze(longTranscript, signal),
+    ).rejects.toThrow(SummaryError);
+  });
+
   it('rejects with SummaryError when Ollama is unreachable', async () => {
     fetchMock.mockRejectedValue(new TypeError('fetch failed'));
 
@@ -182,6 +208,36 @@ describe('OllamaMeetingAnalyzer', () => {
     fetchMock.mockImplementation(() => {
       controller.abort(reason);
       return Promise.reject(reason);
+    });
+
+    await expect(
+      new OllamaMeetingAnalyzer(settings).analyze('meeting', controller.signal),
+    ).rejects.toBe(reason);
+  });
+
+  it('rejects with the signal reason when fetch rejects with another error on abort', async () => {
+    const controller = new AbortController();
+    const reason = new Error('timed out');
+    fetchMock.mockResolvedValueOnce(insights('- part 1')).mockImplementationOnce(() => {
+      controller.abort(reason);
+      return Promise.reject(new DOMException('This operation was aborted', 'AbortError'));
+    });
+
+    await expect(
+      new OllamaMeetingAnalyzer(settings).analyze(longTranscript, controller.signal),
+    ).rejects.toBe(reason);
+  });
+
+  it('rejects with the signal reason when the abort comes while the answer is read', async () => {
+    const controller = new AbortController();
+    const reason = new Error('timed out');
+    fetchMock.mockImplementation(() => {
+      const response = answer('{}');
+      vi.spyOn(response, 'json').mockImplementation(() => {
+        controller.abort(reason);
+        return Promise.reject(new DOMException('This operation was aborted', 'AbortError'));
+      });
+      return Promise.resolve(response);
     });
 
     await expect(

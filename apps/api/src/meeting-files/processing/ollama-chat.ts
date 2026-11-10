@@ -46,7 +46,7 @@ export function splitText(text: string, maxChars: number): string[] {
 /**
  * The request code shared by the Ollama adapters: one chat request with a JSON schema through
  * `format` (no tools), and the map-reduce combining of part summaries. Every failure except an
- * abort is a `SummaryError`, logged under the owner's name.
+ * abort is a `SummaryError`, logged under the owner's name; an abort rejects with the signal's reason.
  */
 export class OllamaChat {
   /** Characters of input that fit into one request. */
@@ -89,7 +89,7 @@ export class OllamaChat {
       });
     } catch (error) {
       if (signal.aborted) {
-        throw error;
+        throw signal.reason as Error;
       }
       throw this.failure(`Ollama is unreachable at ${this.settings.url}: ${String(error)}`);
     }
@@ -101,9 +101,9 @@ export class OllamaChat {
     try {
       const body = (await response.json()) as { message?: { content?: string } };
       return JSON.parse(body.message?.content ?? '') as unknown;
-    } catch (error) {
+    } catch {
       if (signal.aborted) {
-        throw error;
+        throw signal.reason as Error;
       }
       throw this.failure('Ollama returned an answer that is not the requested JSON');
     }
