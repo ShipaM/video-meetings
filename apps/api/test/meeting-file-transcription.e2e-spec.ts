@@ -556,6 +556,37 @@ describe('Meeting file transcription (e2e)', () => {
       await details(ownerToken, meetingId, fileId).expect(404);
     });
 
+    it('deletes the insights, their action items and decisions with the file', async () => {
+      const fileId = await uploadRecording(ownerToken, meetingId, 'call.mp3');
+      await settled(ownerToken, meetingId, fileId);
+
+      const prisma = app.get(PrismaService);
+      const insights = await prisma.recordingInsights.upsert({
+        where: { fileId },
+        update: {},
+        create: {
+          fileId,
+          summary: 'A summary.',
+          actionItems: {
+            create: [
+              { position: 0, description: 'Send the notes', assignee: 'Alice' },
+              { position: 1, description: 'Book a room' },
+            ],
+          },
+          decisions: { create: [{ position: 0, text: 'Ship on Friday' }] },
+        },
+      });
+
+      await request(server())
+        .delete(`/meetings/${meetingId}/files/${fileId}`)
+        .set(auth(ownerToken))
+        .expect(204);
+
+      expect(await prisma.recordingInsights.findUnique({ where: { fileId } })).toBeNull();
+      expect(await prisma.actionItem.count({ where: { insightsId: insights.id } })).toBe(0);
+      expect(await prisma.meetingDecision.count({ where: { insightsId: insights.id } })).toBe(0);
+    });
+
     it('deleting during transcription brings back neither the file nor its transcript', async () => {
       const release = transcriber.control.hold();
       const fileId = await uploadRecording(ownerToken, meetingId, 'call.mp3');
