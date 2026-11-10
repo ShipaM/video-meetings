@@ -21,6 +21,7 @@ import {
 import { FilePreviewPanel, FileSummary, ImageThumbnail, useFileLink } from './file-preview';
 import { getExtension } from './file-types';
 import { deleteFile, downloadFile, retryProcessing } from './files-api';
+import { RecordingInsights } from './recording-insights';
 import { RecordingPanel } from './recording-player';
 import { UnmountListener } from './unmount-listener';
 import { useConfirmedRemoval } from './use-confirmed-removal';
@@ -280,7 +281,11 @@ function FileRow({ file, actions }: { file: MeetingFile; actions?: FileActions }
           {error}
         </p>
       )}
-      {file.status === 'READY' && file.summary !== null && <FileSummary summary={file.summary} />}
+      {file.status === 'READY' && file.insights !== null ? (
+        <RecordingInsights summary={file.summary} insights={file.insights} />
+      ) : (
+        file.status === 'READY' && file.summary !== null && <FileSummary summary={file.summary} />
+      )}
       {isPreviewOpen && <FilePreviewPanel id={previewId} file={file} preview={preview} />}
       {isPlayerOpen && <RecordingPanel id={playerId} file={file} link={preview} playOnOpen />}
     </li>
