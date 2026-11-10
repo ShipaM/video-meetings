@@ -2,6 +2,7 @@ import type { FactoryProvider } from '@nestjs/common';
 import { FakeMeetingAnalyzer } from './fake-meeting-analyzer.js';
 import { MeetingAnalyzer } from './meeting-analyzer.js';
 import { MeetingAnalyzerProvider } from './meeting-analyzer.provider.js';
+import { OllamaMeetingAnalyzer } from './ollama-meeting-analyzer.js';
 import { SummaryError } from './summarizer.js';
 
 describe('FakeMeetingAnalyzer', () => {
@@ -60,9 +61,17 @@ describe('MeetingAnalyzerProvider', () => {
     expect(provider.useFactory()).toBeInstanceOf(FakeMeetingAnalyzer);
   });
 
-  it('refuses AI_PROVIDER=local until the Ollama analyzer exists', () => {
+  it('binds the Ollama analyzer with AI_PROVIDER=local', () => {
     vi.stubEnv('AI_PROVIDER', 'local');
+    vi.stubEnv('OLLAMA_MODEL', 'test-model');
 
-    expect(() => provider.useFactory()).toThrow(/no meeting analyzer yet/);
+    expect(provider.useFactory()).toBeInstanceOf(OllamaMeetingAnalyzer);
+  });
+
+  it('refuses AI_PROVIDER=local without OLLAMA_MODEL', () => {
+    vi.stubEnv('AI_PROVIDER', 'local');
+    vi.stubEnv('OLLAMA_MODEL', '');
+
+    expect(() => provider.useFactory()).toThrow(/OLLAMA_MODEL/);
   });
 });

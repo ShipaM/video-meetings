@@ -1,4 +1,5 @@
-import { OllamaSummarizer, splitText } from './ollama-summarizer.js';
+import { splitText } from './ollama-chat.js';
+import { OllamaSummarizer } from './ollama-summarizer.js';
 import { SummaryError } from './summarizer.js';
 
 describe('splitText', () => {
