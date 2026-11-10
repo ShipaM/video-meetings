@@ -4,6 +4,7 @@ import { CommandHandlers } from './commands/index.js';
 import { fileLinkSecret } from '../storage/storage.config.js';
 import { StorageModule } from '../storage/storage.module.js';
 import { MeetingFilesController } from './meeting-files.controller.js';
+import { MeetingAnalyzerProvider } from './processing/meeting-analyzer.provider.js';
 import { ProcessingQueue } from './processing/processing-queue.js';
 import { SummarizerProvider } from './processing/summarizer.provider.js';
 import { TranscriberProvider } from './processing/transcriber.provider.js';
@@ -18,6 +19,7 @@ import { UploadsController } from './uploads.controller.js';
   providers: [
     TusService,
     SummarizerProvider,
+    MeetingAnalyzerProvider,
     TranscriberProvider,
     ProcessingQueue,
     StorageMaintenanceWorker,

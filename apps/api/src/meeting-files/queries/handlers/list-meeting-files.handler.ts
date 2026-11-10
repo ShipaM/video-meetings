@@ -1,7 +1,11 @@
 import { IQueryHandler, QueryBus, QueryHandler } from '@nestjs/cqrs';
 import { GetMeetingQuery } from '../../../meetings/index.js';
 import { PrismaService } from '../../../prisma/prisma.service.js';
-import { type MeetingFileListItem, toMeetingFileListItem } from '../../meeting-files.types.js';
+import {
+  INSIGHTS_INCLUDE,
+  type MeetingFileListItem,
+  toMeetingFileListItem,
+} from '../../meeting-files.types.js';
 import { ListMeetingFilesQuery } from '../list-meeting-files.query.js';
 
 @QueryHandler(ListMeetingFilesQuery)
@@ -18,8 +22,8 @@ export class ListMeetingFilesHandler implements IQueryHandler<ListMeetingFilesQu
     const files = await this.prisma.meetingFile.findMany({
       where: { meetingId, status: { not: 'UPLOADING' } },
       orderBy: { createdAt: 'desc' },
-      // Summaries come with the list, so a page polling it sees them as soon as files are READY.
-      include: { summary: true },
+      // Summaries and insights come with the list, so a page polling it sees them once files are READY.
+      include: { summary: true, insights: INSIGHTS_INCLUDE },
     });
     return files.map(toMeetingFileListItem);
   }

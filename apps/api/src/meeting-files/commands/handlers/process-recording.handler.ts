@@ -15,7 +15,8 @@ import {
   transcriptSummaryTimeoutMs,
   transcriptionTimeoutMs,
 } from '../../processing/processing.config.js';
-import { Summarizer, SummaryError } from '../../processing/summarizer.js';
+import { MeetingAnalyzer } from '../../processing/meeting-analyzer.js';
+import { SummaryError } from '../../processing/summarizer.js';
 import {
   type TranscriptPiece,
   Transcriber,
@@ -52,7 +53,7 @@ export class ProcessRecordingHandler implements ICommandHandler<ProcessRecording
     private readonly prisma: PrismaService,
     private readonly storage: FilesStorageService,
     private readonly transcriber: Transcriber,
-    private readonly summarizer: Summarizer,
+    private readonly analyzer: MeetingAnalyzer,
   ) {}
 
   async execute({ fileId, attempt, signal }: ProcessRecordingCommand): Promise<void> {
@@ -77,8 +78,8 @@ export class ProcessRecordingHandler implements ICommandHandler<ProcessRecording
     };
 
     try {
-      // A transcript stored by an earlier attempt (whose summary failed) is reused: only the
-      // summary is made again, not hours of transcription.
+      // A transcript stored by an earlier attempt (whose analysis failed) is reused: only the
+      // insights are made again, not hours of transcription.
       const stored = await this.prisma.transcriptSegment.findMany({
         where: { fileId },
         orderBy: { position: 'asc' },
@@ -90,15 +91,17 @@ export class ProcessRecordingHandler implements ICommandHandler<ProcessRecording
           : await this.transcribe(file, current, stage);
 
       await this.enterStage(current, 'SUMMARIZING');
-      const summary = await stage(transcriptSummaryTimeoutMs(durationMs), (summarySignal) =>
-        this.summarizer.summarize(
-          pieces.map((piece) => piece.text).join('\n'),
-          summarySignal,
-          'transcript',
-        ),
+      const insights = await stage(transcriptSummaryTimeoutMs(durationMs), (analysisSignal) =>
+        this.analyzer.analyze(pieces.map((piece) => piece.text).join('\n'), analysisSignal),
       );
+      const actionItems = insights.actionItems.map(({ description, assignee }, position) => ({
+        position,
+        description,
+        assignee,
+      }));
+      const decisions = insights.decisions.map(({ text }, position) => ({ position, text }));
 
-      // Status and summary together: a file deleted meanwhile (0 rows) gets nothing back.
+      // Status and insights together: a file deleted meanwhile (0 rows) gets nothing back.
       await this.prisma.$transaction(
         async (tx) => {
           const { count } = await tx.meetingFile.updateMany({
@@ -106,10 +109,15 @@ export class ProcessRecordingHandler implements ICommandHandler<ProcessRecording
             data: { status: 'READY', failureReason: null },
           });
           if (count > 0) {
-            await tx.meetingFileSummary.upsert({
-              where: { fileId },
-              create: { fileId, text: summary },
-              update: { text: summary, createdAt: new Date() },
+            // Replaces any earlier result; its action items and decisions go with it (cascade).
+            await tx.recordingInsights.deleteMany({ where: { fileId } });
+            await tx.recordingInsights.create({
+              data: {
+                fileId,
+                summary: insights.summary,
+                actionItems: { createMany: { data: actionItems } },
+                decisions: { createMany: { data: decisions } },
+              },
             });
           }
         },

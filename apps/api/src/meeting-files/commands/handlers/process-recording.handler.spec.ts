@@ -21,11 +21,12 @@ describe('ProcessRecordingHandler', () => {
   const txUpdateMany = vi.fn();
   const deleteSegments = vi.fn();
   const createSegments = vi.fn();
-  const upsert = vi.fn();
+  const deleteInsights = vi.fn();
+  const createInsights = vi.fn();
   const findSegments = vi.fn();
   const transaction = vi.fn();
   const transcribe = vi.fn();
-  const summarize = vi.fn();
+  const analyze = vi.fn();
   const probe = vi.mocked(probeMedia);
   const extract = vi.mocked(extractAudio);
   let root: string;
@@ -33,7 +34,7 @@ describe('ProcessRecordingHandler', () => {
   const tx = {
     meetingFile: { updateMany: txUpdateMany },
     transcriptSegment: { deleteMany: deleteSegments, createMany: createSegments },
-    meetingFileSummary: { upsert },
+    recordingInsights: { deleteMany: deleteInsights, create: createInsights },
   };
   const storage = {
     pathOf: (key: string) => path.join(root, 'uploads', key),
@@ -49,7 +50,7 @@ describe('ProcessRecordingHandler', () => {
     } as unknown as PrismaService,
     storage as unknown as FilesStorageService,
     { transcribe },
-    { summarize },
+    { analyze },
   );
 
   const current = { id: 'f1', status: 'PROCESSING', processingAttempt: 2 };
@@ -64,6 +65,20 @@ describe('ProcessRecordingHandler', () => {
     { startMs: 0, endMs: 1500, text: 'Ship on Friday.' },
     { startMs: 1500, endMs: 3000, text: 'Mark fixes the bug.' },
   ];
+  const insights = {
+    summary: '- Ship on Friday',
+    actionItems: [
+      { description: 'Fix the bug', assignee: 'Mark' },
+      { description: 'Write the release notes', assignee: null },
+    ],
+    decisions: [{ text: 'Ship on Friday' }],
+  };
+  /** The rows of `insights` in order, as written to the database. */
+  const actionItemRows = [
+    { position: 0, description: 'Fix the bug', assignee: 'Mark' },
+    { position: 1, description: 'Write the release notes', assignee: null },
+  ];
+  const decisionRows = [{ position: 0, text: 'Ship on Friday' }];
   const run = (signal = new AbortController().signal) =>
     handler.execute(new ProcessRecordingCommand('f1', 2, signal));
   const failedWith = (failureReason: string) =>
@@ -91,7 +106,7 @@ describe('ProcessRecordingHandler', () => {
     probe.mockResolvedValue({ durationMs: 3000, hasAudio: true });
     extract.mockResolvedValue(3000);
     transcribe.mockResolvedValue(pieces);
-    summarize.mockResolvedValue('- Ship on Friday');
+    analyze.mockResolvedValue(insights);
   });
 
   describe('processing stage', () => {
@@ -110,9 +125,9 @@ describe('ProcessRecordingHandler', () => {
         seen.transcribe = stages();
         return Promise.resolve(pieces);
       });
-      summarize.mockImplementation(() => {
-        seen.summarize = stages();
-        return Promise.resolve('- Ship on Friday');
+      analyze.mockImplementation(() => {
+        seen.analyze = stages();
+        return Promise.resolve(insights);
       });
 
       await run();
@@ -120,7 +135,7 @@ describe('ProcessRecordingHandler', () => {
       expect(seen).toEqual({
         probe: ['PREPARING_AUDIO'],
         transcribe: ['PREPARING_AUDIO', 'TRANSCRIBING'],
-        summarize: ['PREPARING_AUDIO', 'TRANSCRIBING', 'SUMMARIZING'],
+        analyze: ['PREPARING_AUDIO', 'TRANSCRIBING', 'SUMMARIZING'],
       });
       expect(updateMany).toHaveBeenCalledWith({
         where: current,
@@ -138,7 +153,7 @@ describe('ProcessRecordingHandler', () => {
     });
   });
 
-  it('stores the transcript, then its summary, and marks the file READY', async () => {
+  it('stores the transcript, then its insights, and marks the file READY', async () => {
     await run();
 
     const workDir = path.join(root, 'derived', 'f1.2');
@@ -151,12 +166,11 @@ describe('ProcessRecordingHandler', () => {
       expect.any(AbortSignal),
     );
     expect(transcribe).toHaveBeenCalledWith(audio, expect.any(AbortSignal));
-    expect(summarize).toHaveBeenCalledWith(
+    expect(analyze).toHaveBeenCalledWith(
       'Ship on Friday.\nMark fixes the bug.',
       expect.any(AbortSignal),
-      'transcript',
     );
-    // The transcript is stored first (kept if the summary fails), then the status and summary.
+    // The transcript is stored first (kept if the analysis fails), then the status and insights.
     expect(txUpdateMany).toHaveBeenNthCalledWith(1, { where: current, data: { durationMs: 3000 } });
     expect(txUpdateMany).toHaveBeenNthCalledWith(2, {
       where: current,
@@ -170,13 +184,54 @@ describe('ProcessRecordingHandler', () => {
         { fileId: 'f1', position: 1, ...pieces[1] },
       ],
     });
-    expect(upsert).toHaveBeenCalledWith({
-      where: { fileId: 'f1' },
-      create: { fileId: 'f1', text: '- Ship on Friday' },
-      update: { text: '- Ship on Friday', createdAt: expect.any(Date) as Date },
+    // Any earlier result is replaced, with its lists (cascade).
+    expect(deleteInsights).toHaveBeenCalledWith({ where: { fileId: 'f1' } });
+    expect(createInsights).toHaveBeenCalledWith({
+      data: {
+        fileId: 'f1',
+        summary: '- Ship on Friday',
+        actionItems: { createMany: { data: actionItemRows } },
+        decisions: { createMany: { data: decisionRows } },
+      },
     });
+    expect(deleteInsights.mock.invocationCallOrder[0]).toBeLessThan(
+      createInsights.mock.invocationCallOrder[0],
+    );
     // The work directory with the extracted audio is gone.
     expect(await readdir(path.join(root, 'derived'))).toEqual([]);
+  });
+
+  it('writes the insights in the transaction that marks the file READY, after it matched', async () => {
+    await run();
+
+    // The second transaction holds the result: READY first, then the insights in the same client.
+    expect(transaction).toHaveBeenCalledTimes(2);
+    const ready = txUpdateMany.mock.invocationCallOrder[1];
+    expect(deleteInsights.mock.invocationCallOrder[0]).toBeGreaterThan(ready);
+  });
+
+  it('stores empty lists when the analysis found no action items or decisions', async () => {
+    analyze.mockResolvedValue({ summary: '- Small talk', actionItems: [], decisions: [] });
+
+    await run();
+
+    expect(createInsights).toHaveBeenCalledWith({
+      data: {
+        fileId: 'f1',
+        summary: '- Small talk',
+        actionItems: { createMany: { data: [] } },
+        decisions: { createMany: { data: [] } },
+      },
+    });
+  });
+
+  it('writes no insights when the file was deleted or superseded during the analysis', async () => {
+    txUpdateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
+
+    await run();
+
+    expect(createSegments).toHaveBeenCalledTimes(1);
+    expect(createInsights).not.toHaveBeenCalled();
   });
 
   it('does nothing for a deleted file or a stale attempt', async () => {
@@ -195,7 +250,7 @@ describe('ProcessRecordingHandler', () => {
     await run();
 
     expect(createSegments).not.toHaveBeenCalled();
-    expect(upsert).not.toHaveBeenCalled();
+    expect(createInsights).not.toHaveBeenCalled();
   });
 
   it('fails a recording over MAX_RECORDING_MINUTES before extracting anything', async () => {
@@ -246,13 +301,13 @@ describe('ProcessRecordingHandler', () => {
     failedWith('The recording could not be read');
   });
 
-  it('fails a recording without speech, without asking for a summary', async () => {
+  it('fails a recording without speech, without asking for an analysis', async () => {
     transcribe.mockResolvedValue([]);
 
     await run();
 
     failedWith('No speech found in the recording');
-    expect(summarize).not.toHaveBeenCalled();
+    expect(analyze).not.toHaveBeenCalled();
   });
 
   it('fails with "The recording could not be transcribed" when the transcriber fails', async () => {
@@ -265,16 +320,16 @@ describe('ProcessRecordingHandler', () => {
   });
 
   it('fails with "Summary could not be generated" when the model fails, keeping the transcript', async () => {
-    summarize.mockRejectedValue(new SummaryError('model down'));
+    analyze.mockRejectedValue(new SummaryError('model down'));
 
     await run();
 
     failedWith('Summary could not be generated');
     expect(createSegments).toHaveBeenCalledTimes(1);
-    expect(upsert).not.toHaveBeenCalled();
+    expect(createInsights).not.toHaveBeenCalled();
   });
 
-  it('reuses a stored transcript: only the summary is made again', async () => {
+  it('reuses a stored transcript: only the insights are made again', async () => {
     findFirst.mockResolvedValue({ ...file, durationMs: 3000 });
     findSegments.mockResolvedValue(pieces);
 
@@ -288,24 +343,23 @@ describe('ProcessRecordingHandler', () => {
     expect(probe).not.toHaveBeenCalled();
     expect(transcribe).not.toHaveBeenCalled();
     expect(createSegments).not.toHaveBeenCalled();
-    expect(summarize).toHaveBeenCalledWith(
+    expect(analyze).toHaveBeenCalledWith(
       'Ship on Friday.\nMark fixes the bug.',
       expect.any(AbortSignal),
-      'transcript',
     );
     expect(txUpdateMany).toHaveBeenCalledWith({
       where: current,
       data: { status: 'READY', failureReason: null },
     });
-    expect(upsert).toHaveBeenCalled();
+    expect(createInsights).toHaveBeenCalled();
   });
 
   it('does not call a failure after a finished stage a timeout', async () => {
-    // A 20 ms summary budget: the summary itself ignores it and ends after its timer has fired,
+    // A 20 ms analysis budget: the analysis itself ignores it and ends after its timer has fired,
     // then the final write fails for another reason.
     vi.stubEnv('DOCUMENT_PROCESSING_TIMEOUT_SECONDS', '0.02');
-    summarize.mockImplementation(
-      () => new Promise((resolve) => setTimeout(() => resolve('- Ship on Friday'), 100)),
+    analyze.mockImplementation(
+      () => new Promise((resolve) => setTimeout(() => resolve(insights), 100)),
     );
     transaction
       .mockImplementationOnce((work: (client: typeof tx) => Promise<unknown>) => work(tx))
