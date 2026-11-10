@@ -6,6 +6,7 @@ import type { MeetingFileKind } from '../../generated/prisma/enums.js';
 import { jobsPollingIntervalSeconds } from '../../jobs/jobs.config.js';
 import { JobsService } from '../../jobs/jobs.service.js';
 import { RECORDING_KINDS, isRecording } from '../file-types.js';
+import { AnalyzeRecordingCommand } from '../commands/analyze-recording.command.js';
 import { ProcessDocumentCommand } from '../commands/process-document.command.js';
 import { ProcessRecordingCommand } from '../commands/process-recording.command.js';
 import {
@@ -104,6 +105,13 @@ export class ProcessingQueue implements OnApplicationBootstrap {
         await this.commandBus.execute(
           new ProcessRecordingCommand(job.data.fileId, job.data.attempt, job.signal),
         );
+      },
+    );
+    await boss.work<AnalyzeRecordingJob>(
+      ANALYZE_RECORDING_QUEUE,
+      { pollingIntervalSeconds, localConcurrency: 1 },
+      async ([job]) => {
+        await this.commandBus.execute(new AnalyzeRecordingCommand(job.data.fileId, job.signal));
       },
     );
   }

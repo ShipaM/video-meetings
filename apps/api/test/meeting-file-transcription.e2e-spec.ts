@@ -334,22 +334,22 @@ describe('Meeting file transcription (e2e)', () => {
     });
   });
 
-  describe('insights', () => {
-    /**
-     * The fake analyzer quotes the transcript: a summary, an action item with an assignee, one
-     * without (nobody was named), and a decision.
-     */
-    const fakeInsights: Insights = {
-      actionItems: [
-        {
-          description: expect.stringContaining('Fake speech') as string,
-          assignee: expect.stringMatching(/\S/) as string,
-        },
-        { description: expect.stringContaining('Fake speech') as string, assignee: null },
-      ],
-      decisions: [{ text: expect.stringContaining('Fake speech') as string }],
-    };
+  /**
+   * The fake analyzer quotes the transcript: a summary, an action item with an assignee, one
+   * without (nobody was named), and a decision.
+   */
+  const fakeInsights: Insights = {
+    actionItems: [
+      {
+        description: expect.stringContaining('Fake speech') as string,
+        assignee: expect.stringMatching(/\S/) as string,
+      },
+      { description: expect.stringContaining('Fake speech') as string, assignee: null },
+    ],
+    decisions: [{ text: expect.stringContaining('Fake speech') as string }],
+  };
 
+  describe('insights', () => {
     const listed = async (token: string, fileId: string) => {
       const res = await request(server())
         .get(`/meetings/${meetingId}/files`)
@@ -623,6 +623,118 @@ describe('Meeting file transcription (e2e)', () => {
 
       const file = (await details(ownerToken, meetingId, fileId).expect(200)).body as FileDetails;
       expect(file).toMatchObject({ status: 'READY', analysisStatus: null, summary: OLD_SUMMARY });
+    });
+
+    /** Polls the file details until its analysis is no longer RUNNING. */
+    const analysisSettled = async (fileId: string) => {
+      const deadline = Date.now() + 20_000;
+      for (;;) {
+        const file = (await details(ownerToken, meetingId, fileId).expect(200)).body as FileDetails;
+        if (file.analysisStatus !== 'RUNNING') {
+          return file;
+        }
+        if (Date.now() > deadline) {
+          throw new Error(`The analysis of ${fileId} is still RUNNING`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+    };
+
+    const oldSummaryCount = (fileId: string) =>
+      app.get(PrismaService).meetingFileSummary.count({ where: { fileId } });
+
+    it('stores the insights, removes the old summary and clears the status', async () => {
+      const fileId = await olderRecording();
+
+      await analyze(ownerToken, meetingId, fileId).expect(202);
+      const file = await analysisSettled(fileId);
+
+      expect(file).toMatchObject({
+        status: 'READY',
+        failureReason: null,
+        analysisStatus: null,
+        canAnalyze: false,
+        insights: fakeInsights,
+      });
+      expect(file.summary).toContain('Fake speech 1. Fake speech 2. Fake speech 3.');
+      expect(file.transcript).toHaveLength(3);
+      expect(await oldSummaryCount(fileId)).toBe(0);
+      expect(await listed(participantToken, fileId)).toMatchObject({
+        status: 'READY',
+        analysisStatus: null,
+        canAnalyze: false,
+        insights: fakeInsights,
+      });
+      expect(analyzer.control.calls).toBe(1);
+    });
+
+    it('a failure sets FAILED and keeps the transcript and the old summary; it can be started again', async () => {
+      const fileId = await olderRecording();
+      analyzer.control.behave('fail');
+
+      await analyze(ownerToken, meetingId, fileId).expect(202);
+      const failed = await analysisSettled(fileId);
+      expect(failed).toMatchObject({
+        status: 'READY',
+        failureReason: null,
+        analysisStatus: 'FAILED',
+        canAnalyze: true,
+        summary: OLD_SUMMARY,
+        insights: null,
+      });
+      expect(failed.transcript).toHaveLength(3);
+      expect(await oldSummaryCount(fileId)).toBe(1);
+      expect(await listed(participantToken, fileId)).toMatchObject({
+        analysisStatus: 'FAILED',
+        summary: OLD_SUMMARY,
+      });
+
+      // Starting again succeeds this time.
+      analyzer.control.reset();
+      const res = await analyze(ownerToken, meetingId, fileId).expect(202);
+      expect(res.body).toMatchObject({ status: 'READY', analysisStatus: 'RUNNING' });
+      const file = await analysisSettled(fileId);
+      expect(file).toMatchObject({ status: 'READY', analysisStatus: null, insights: fakeInsights });
+      expect(await oldSummaryCount(fileId)).toBe(0);
+      expect(analyzer.control.calls).toBe(1);
+    });
+
+    it('a hanging analyzer times out into FAILED', async () => {
+      const fileId = await olderRecording();
+      analyzer.control.behave('hang');
+
+      await analyze(ownerToken, meetingId, fileId).expect(202);
+      // Times out after DOCUMENT_PROCESSING_TIMEOUT_SECONDS (3 s in the e2e config) per started hour.
+      const file = await analysisSettled(fileId);
+      expect(file).toMatchObject({
+        status: 'READY',
+        analysisStatus: 'FAILED',
+        summary: OLD_SUMMARY,
+        insights: null,
+      });
+    });
+
+    it('deleting during the analysis brings back neither the file nor its insights', async () => {
+      const fileId = await olderRecording();
+      const release = analyzer.control.hold();
+      await analyze(ownerToken, meetingId, fileId).expect(202);
+      await analyzer.control.started();
+
+      await request(server())
+        .delete(`/meetings/${meetingId}/files/${fileId}`)
+        .set(auth(ownerToken))
+        .expect(204);
+
+      // The analysis finishes after the file is gone.
+      release();
+      await analyzer.control.finished();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      const prisma = app.get(PrismaService);
+      expect(await prisma.meetingFile.findUnique({ where: { id: fileId } })).toBeNull();
+      expect(await prisma.recordingInsights.findUnique({ where: { fileId } })).toBeNull();
+      expect(await oldSummaryCount(fileId)).toBe(0);
+      await details(ownerToken, meetingId, fileId).expect(404);
     });
   });
 
