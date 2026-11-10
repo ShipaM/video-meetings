@@ -137,6 +137,59 @@ describe('GetMeetingFileHandler', () => {
     );
   });
 
+  describe('analysis state', () => {
+    const olderRecording = {
+      ...file,
+      kind: 'AUDIO',
+      mimeType: 'audio/mpeg',
+      analysisStatus: null,
+      summary: { text: '- An older summary' },
+      insights: null,
+      transcript: [{ fileId: 'f1', position: 0, startMs: 0, endMs: 1200, text: 'Hello.' }],
+    };
+
+    it('offers the analysis of a READY recording with a transcript but no insights', async () => {
+      findFirst.mockResolvedValue(olderRecording);
+
+      await expect(
+        handler.execute(new GetMeetingFileQuery('u1', 'm1', 'f1')),
+      ).resolves.toMatchObject({ analysisStatus: null, canAnalyze: true });
+    });
+
+    it('offers it again after a failed analysis', async () => {
+      findFirst.mockResolvedValue({ ...olderRecording, analysisStatus: 'FAILED' });
+
+      await expect(
+        handler.execute(new GetMeetingFileQuery('u1', 'm1', 'f1')),
+      ).resolves.toMatchObject({ analysisStatus: 'FAILED', canAnalyze: true });
+    });
+
+    it('reports a running analysis and does not offer another', async () => {
+      findFirst.mockResolvedValue({ ...olderRecording, analysisStatus: 'RUNNING' });
+
+      await expect(
+        handler.execute(new GetMeetingFileQuery('u1', 'm1', 'f1')),
+      ).resolves.toMatchObject({
+        analysisStatus: 'RUNNING',
+        canAnalyze: false,
+        summary: '- An older summary',
+      });
+    });
+
+    it.each([
+      ['with insights', { insights: { summary: 'x', actionItems: [], decisions: [] } }],
+      ['without a transcript', { transcript: [] }],
+      ['that is not READY', { status: 'FAILED' }],
+      ['that is a document', { kind: 'DOCUMENT', mimeType: 'text/plain' }],
+    ])('does not offer it for a file %s', async (_case, change) => {
+      findFirst.mockResolvedValue({ ...olderRecording, ...change });
+
+      await expect(
+        handler.execute(new GetMeetingFileQuery('u1', 'm1', 'f1')),
+      ).resolves.toMatchObject({ canAnalyze: false });
+    });
+  });
+
   it('answers 404 for a missing file or an upload in progress', async () => {
     findFirst.mockResolvedValue(null);
 

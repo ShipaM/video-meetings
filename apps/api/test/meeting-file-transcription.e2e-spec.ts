@@ -36,6 +36,7 @@ interface FileDetails {
   summary: string | null;
   insights?: Insights | null;
   analysisStatus?: 'RUNNING' | 'FAILED' | null;
+  canAnalyze?: boolean;
   transcript?: Segment[] | null;
 }
 
@@ -522,6 +523,23 @@ describe('Meeting file transcription (e2e)', () => {
       analyzer.control.reset();
       return fileId;
     };
+
+    it('both endpoints offer the analysis of an older recording only', async () => {
+      const older = await olderRecording();
+      const analyzed = await uploadRecording(ownerToken, meetingId, 'call.mp3');
+      await settled(ownerToken, meetingId, analyzed);
+
+      for (const token of [ownerToken, participantToken]) {
+        for (const [fileId, canAnalyze] of [
+          [older, true],
+          [analyzed, false],
+        ] as const) {
+          const file = (await details(token, meetingId, fileId).expect(200)).body as FileDetails;
+          expect(file).toMatchObject({ analysisStatus: null, canAnalyze });
+          expect(await listed(token, fileId)).toMatchObject({ analysisStatus: null, canAnalyze });
+        }
+      }
+    });
 
     it('answers 202 to the owner while the file stays READY with its transcript and old summary', async () => {
       const fileId = await olderRecording();

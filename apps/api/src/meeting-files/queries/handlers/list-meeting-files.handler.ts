@@ -23,8 +23,13 @@ export class ListMeetingFilesHandler implements IQueryHandler<ListMeetingFilesQu
       where: { meetingId, status: { not: 'UPLOADING' } },
       orderBy: { createdAt: 'desc' },
       // Summaries and insights come with the list, so a page polling it sees them once files are READY.
-      include: { summary: true, insights: INSIGHTS_INCLUDE },
+      // The segment count tells whether the analysis can be started; a long meeting has thousands.
+      include: {
+        summary: true,
+        insights: INSIGHTS_INCLUDE,
+        _count: { select: { transcript: true } },
+      },
     });
-    return files.map(toMeetingFileListItem);
+    return files.map(({ _count, ...file }) => toMeetingFileListItem(file, _count.transcript));
   }
 }
